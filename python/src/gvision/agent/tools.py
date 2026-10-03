@@ -3,14 +3,16 @@
 The descriptions carry routing hints: on Arnau's PC they lifted Qwen3.5-2B
 from 14/20 to 17/20 correct tool calls, and its typical mistake was sending
 "where is X?" to ``query_state`` instead of ``set_watch``. Keep the list
-short; tools from the plan that are not built yet (read_region, look,
-get_recent_text, learn_label) are left out so the model can't pick them.
+short; tools from the plan that are not built yet are left out so the model
+can't pick them. Optional features add theirs with ``ToolExecutor.register``
+(scene memory adds ``look``).
 """
 
 from __future__ import annotations
 
 import json
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -81,6 +83,8 @@ class ToolResult:
     content: dict[str, Any]
     refs: list[str] = field(default_factory=list)
     """Elements the answer is about, for the spotlight."""
+    speak: str | None = None
+    """A finished spoken answer (e.g. from Qwen's vision); spares the agent's second call."""
 
     def json(self) -> str:
         return json.dumps(self.content)
@@ -90,6 +94,20 @@ class ToolExecutor:
     def __init__(self, world: WorldState, find_timeout: float = FIND_TIMEOUT_S) -> None:
         self.world = world
         self.find_timeout = find_timeout
+        self.schemas: list[dict[str, Any]] = list(TOOLS)
+        """What Qwen is offered: the built-in tools plus registered ones."""
+        self.hints: list[str] = []
+        """System prompt lines for registered tools."""
+        self._extra: dict[str, Callable[..., Awaitable[ToolResult]]] = {}
+
+    def register(self, schema: dict[str, Any], handler: Callable[..., Awaitable[ToolResult]], hint: str = "") -> None:
+        self.schemas.append(schema)
+        self._extra[schema["function"]["name"]] = handler
+        if hint:
+            self.hints.append(hint)
+
+    def has(self, name: str) -> bool:
+        return name in self._extra
 
     async def run(self, name: str, args: dict[str, Any]) -> ToolResult:
         try:
@@ -99,6 +117,8 @@ class ToolExecutor:
                 return self.clear_watch(**args)
             if name == "query_state":
                 return ToolResult(self.world.snapshot())
+            if name in self._extra:
+                return await self._extra[name](**args)
         except TypeError as e:  # wrong or missing arguments
             return ToolResult({"error": f"bad arguments for {name}: {e}"})
         return ToolResult({"error": f"unknown tool {name}"})

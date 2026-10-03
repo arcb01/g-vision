@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from gvision.agent.qwen import Reply
-from gvision.agent.tools import TOOLS, ToolExecutor, ToolResult
+from gvision.agent.tools import ToolExecutor, ToolResult
 from gvision.world import WorldState
 
 log = logging.getLogger(__name__)
@@ -26,8 +26,10 @@ You can highlight objects on screen with tools.
 - Answer in one short spoken sentence, at most 15 words. No markdown, no lists.
 - Only say what the tool results or the state show. If something was not found, say you \
 can't see it yet and that you're watching for it.
-- You can't read text or look back in time yet; say so briefly if asked.
-Current state: {state}"""
+- You can't read text yet; say so briefly if asked.
+{hints}Current state: {state}"""
+
+NO_LOOK_HINT = "- You can't look back in time yet; say so briefly if asked."
 
 
 class Chat(Protocol):
@@ -66,11 +68,13 @@ class Agent:
 
     async def handle(self, request: str) -> Answer:
         t0 = time.perf_counter()
+        hints = self.tools.hints if self.tools.has("look") else [NO_LOOK_HINT, *self.tools.hints]
+        system = SYSTEM_PROMPT.format(hints="".join(h + "\n" for h in hints), state=json.dumps(self.world.snapshot()))
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT.format(state=json.dumps(self.world.snapshot()))},
+            {"role": "system", "content": system},
             {"role": "user", "content": request},
         ]
-        reply = await self.qwen.chat(messages, tools=TOOLS)
+        reply = await self.qwen.chat(messages, tools=self.tools.schemas)
         latency = {"llm_tool_call": (time.perf_counter() - t0) * 1000}
         if not reply.tool_calls:
             return Answer(reply.content or "Sorry, I didn't get that.", latency_ms=latency)
@@ -84,9 +88,11 @@ class Agent:
             results.append(result)
             messages.append({"role": "tool", "tool_call_id": call.id, "content": result.json()})
         latency["tools"] = (time.perf_counter() - t1) * 1000
+        refs = [ref for r in results for ref in r.refs]
+        if all(r.speak for r in results):
+            return Answer(" ".join(r.speak for r in results), refs, [c.name for c in reply.tool_calls], latency)
 
         t2 = time.perf_counter()
         final = await self.qwen.chat(messages, max_tokens=60)
         latency["llm_answer"] = (time.perf_counter() - t2) * 1000
-        refs = [ref for r in results for ref in r.refs]
         return Answer(final.content or fallback_text(results), refs, [c.name for c in reply.tool_calls], latency)

@@ -14,12 +14,13 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import Protocol
 
 import numpy as np
 
 from gvision.bridge import Bridge
-from gvision.perception.capture import FrameSource
+from gvision.perception.capture import Frame, FrameSource
 from gvision.perception.detector import Detection
 from gvision.perception.tracker import ByteTracker, Track
 from gvision.protocol import (
@@ -90,6 +91,8 @@ class LivePipeline:
         self._latency: dict[str, deque[float]] = {k: deque(maxlen=30) for k in ("capture", "detector", "tracker")}
         self._frame_times: deque[float] = deque(maxlen=30)
         self._dimmed = False
+        self.frame_listeners: list[Callable[[Frame], None]] = []
+        """Called with every captured frame; must return quickly (scene memory uses it)."""
         bridge.on_message(self._on_message)
 
     async def _on_message(self, msg: Message) -> None:
@@ -182,6 +185,8 @@ class LivePipeline:
             if frame is None:
                 await asyncio.sleep(period)
                 continue
+            for listen in self.frame_listeners:
+                listen(frame)
             prompts = self.prompts()
             if prompts != list(self.detector.classes):
                 log.info("YOLOE prompts: %s", ", ".join(prompts))

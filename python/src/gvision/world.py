@@ -1,9 +1,10 @@
 """World state shared by the fast loop and the slow path (plan section 8).
 
-Only the two sections "find X" needs exist so far:
+Sections so far:
 
 - **tracked objects**, written by the live pipeline after every tracker step;
-- **active watches**, written by the agent's ``set_watch`` / ``clear_watch``.
+- **active watches**, written by the agent's ``set_watch`` / ``clear_watch``;
+- **situation**, written by the narrator (``gvision.memory``).
 
 One writer per section; readers take what is there. Everything runs on one
 asyncio loop, so no locking is needed.
@@ -47,6 +48,23 @@ class Watch:
     started: float = field(default_factory=time.monotonic)
 
 
+@dataclass
+class Situation:
+    """The narrator's latest notes (plan 7.3); approximate context only."""
+
+    ts: float
+    """Capture time of the frame it describes."""
+    situation: str
+    player: str = ""
+    objective: str = ""
+    summary: str = ""
+    updated: float = field(default_factory=time.monotonic)
+
+    def notes(self) -> dict[str, str]:
+        return {k: v for k, v in (("situation", self.situation), ("player", self.player),
+                                  ("objective", self.objective), ("summary", self.summary)) if v and v != "unknown"}
+
+
 class WorldState:
     def __init__(self) -> None:
         self.objects: list[TrackedObject] = []
@@ -55,6 +73,7 @@ class WorldState:
         self.watch_version = 0
         """Bumped on every watch change, so the pipeline can react once."""
         self._objects_changed = asyncio.Event()
+        self.situation: Situation | None = None
 
     # --- tracked objects (writer: live pipeline) ---------------------------
 
@@ -95,6 +114,11 @@ class WorldState:
             self.watch_version += 1
         return removed
 
+    # --- situation (writer: narrator) -------------------------------------
+
+    def set_situation(self, situation: Situation) -> None:
+        self.situation = situation
+
     # --- snapshot for Qwen -------------------------------------------------
 
     def snapshot(self) -> dict:
@@ -102,8 +126,12 @@ class WorldState:
         counts: dict[str, int] = {}
         for o in self.confirmed():
             counts[o.label] = counts.get(o.label, 0) + 1
-        return {
+        snap: dict = {
             "objects": [{"ref": o.ref, "label": o.label, "where": where(o.box)} for o in self.confirmed()][:20],
             "counts": counts,
             "watching": sorted(self.watches),
         }
+        if self.situation:
+            age = round(time.monotonic() - self.situation.updated)
+            snap["situation"] = {**self.situation.notes(), "seconds_ago": age}
+        return snap

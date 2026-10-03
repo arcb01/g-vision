@@ -25,7 +25,13 @@ python/            Perception, agent and audio processes (package: gvision)
       tracker.py   ByteTrack with tentative / confirmed / lost life cycle
       live.py      capture -> detect -> track -> overlay messages
       exclusion_check.py  proves the overlay is not in captured frames
-    world.py       World state: tracked objects + active watches, snapshot for Qwen
+    world.py       World state: tracked objects, active watches, situation; snapshot for Qwen
+    memory/
+      history.py   Last 60 s of the screen at 2 fps, downscaled JPEGs (~5 MB)
+      events.py    What the tracker saw appear and leave
+      narrator.py  Qwen's running notes on the situation, every ~25 s
+      look.py      The look tool: Qwen looks at recent frames ("what just hit me?")
+      shared.py    Narrator and player share llama-server, the player first
     assistant.py   Push-to-talk -> speech-to-text -> agent -> panel, spotlight, voice
     agent/
       qwen.py      Client for Qwen3.5-2B in llama-server (OpenAI-compatible API)
@@ -172,6 +178,27 @@ in our tests), `--voice am_michael`, `--no-mic` (type requests in the
 terminal), `--no-tts`, `--qwen-url`. The first run downloads the Whisper
 weights to the Hugging Face cache and Kokoro (~120 MB) into
 `python/models/kokoro/`.
+
+### Scene memory: "what just hit me?"
+
+With `--agent`, the backend also remembers the last minute of the screen
+(640 px wide JPEGs at 2 fps, about 5 MB of RAM and nothing on the GPU) and
+logs what the tracker saw appear and leave. Ask "what just hit me?", "what
+was that?" or "what happened?" and Qwen calls `look`: it gets up to four
+frames from the last seconds (the newest plus the ones where the screen
+changed most, such as a hit flash) and answers from them in one go.
+
+Every 25 s a narrator sends Qwen the newest frame, the recent events and its
+previous notes, and gets back the situation, the player's visible state, the
+objective and a short running summary of the session. These notes go into
+every request, so "what's going on?" is answered without an extra look. The
+narrator skips a turn when the screen hasn't changed, and a question always
+goes first: a narrator call in flight is cancelled, and it waits until 5 s
+after the last answer. Its readings are rough context, not exact values.
+
+Both need llama-server started with the `--mmproj` vision file (as above).
+Options: `--narrate-every 40` (or `0` to turn the narrator off),
+`--history-seconds 30`, `--no-memory` (none of it).
 
 YOLOE's text prompts work on realistic graphics. On blocky or stylized games
 (Minecraft) they find little or nothing yet; visual exemplars and Qwen's
