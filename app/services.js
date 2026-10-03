@@ -162,15 +162,47 @@ function parseNetstat(text, port) {
 }
 
 // Which process holds a port: used to stop a server this app did not start
-// (an orphan from an earlier run, or one started by hand).
+// (an orphan from an earlier run, or one started by hand). On Windows it asks
+// netstat first, then PowerShell; `tried` says what each returned, for the
+// panel when nothing is found.
 function listeningPids(port) {
+  const tried = [];
   if (IS_WIN) {
-    const r = spawnSync('netstat', ['-ano', '-p', 'TCP'], { encoding: 'utf8', windowsHide: true });
-    return r.status === 0 ? parseNetstat(r.stdout, port) : [];
+    const ns = spawnSync('netstat', ['-ano'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+    // Use the output whatever the exit code; some builds return non-zero.
+    let pids = ns.stdout ? parseNetstat(ns.stdout, port) : [];
+    tried.push(`netstat ${ns.error ? ns.error.code || ns.error.message : `exit ${ns.status}, ${pids.length} found`}`);
+    if (pids.length) return { pids, tried };
+    const ps = spawnSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`,
+    ], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
+    pids = parsePidList(ps.stdout || '');
+    tried.push(`PowerShell ${ps.error ? ps.error.code || ps.error.message : `exit ${ps.status}, ${pids.length} found`}`);
+    return { pids, tried };
   }
   const r = spawnSync('lsof', ['-t', `-iTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' });
-  if (r.error || !r.stdout) return [];
-  return r.stdout.split(/\s+/).filter(Boolean).map(Number);
+  const pids = parsePidList(r.stdout || '');
+  tried.push(`lsof ${r.error ? r.error.code : `${pids.length} found`}`);
+  return { pids, tried };
+}
+
+// Last resort: processes whose command line contains `match` (e.g. "-m gvision").
+function pidsByCommandLine(match) {
+  if (IS_WIN) {
+    const q = match.replace(/'/g, "''");
+    const ps = spawnSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains('${q}') } | Select-Object -ExpandProperty ProcessId`,
+    ], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
+    return parsePidList(ps.stdout || '');
+  }
+  const r = spawnSync('pgrep', ['-f', '--', match], { encoding: 'utf8' });
+  return parsePidList(r.stdout || '');
+}
+
+function parsePidList(text) {
+  return [...new Set(text.split(/\s+/).filter((t) => /^\d+$/.test(t)).map(Number))].filter((p) => p > 0);
 }
 
 function killTree(pid) {
@@ -190,9 +222,9 @@ function killTree(pid) {
 // One child process: spawn, wait until `isReady()` passes, keep the last log
 // lines for the panel, stop the whole process tree on quit.
 class Service extends EventEmitter {
-  constructor({ name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound = null, port = null }) {
+  constructor({ name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound = null, port = null, match = null }) {
     super();
-    Object.assign(this, { name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound, port });
+    Object.assign(this, { name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound, port, match });
     this.state = 'stopped';
     this.detail = '';
     this.child = null;
@@ -302,9 +334,15 @@ class Service extends EventEmitter {
 
   // A server we found already running: stop whatever holds its port.
   async _stopExternal() {
-    const pids = this.port ? listeningPids(this.port).filter((p) => p !== process.pid) : [];
+    if (!this.port) return;
+    const { pids: found, tried } = listeningPids(this.port);
+    let pids = found.filter((p) => p !== process.pid);
+    if (!pids.length && this.match) {
+      pids = pidsByCommandLine(this.match).filter((p) => p !== process.pid);
+      tried.push(`command line "${this.match}": ${pids.length} found`);
+    }
     if (!pids.length) {
-      this._set(this.state, `can't stop it from here: no process found on port ${this.port}`);
+      this._set(this.state, `can't stop it from here: no process found on port ${this.port} (${tried.join('; ')})`);
       return;
     }
     this._set('stopping');
@@ -342,6 +380,7 @@ function createServices(cfg, { logDir = path.join(REPO_ROOT, 'logs') } = {}) {
         ...llamaCommand(cfg.llama),
         isReady: () => httpOk(`http://127.0.0.1:${port}/health`),
         port,
+        match: 'llama-server',
         readyTimeoutS: cfg.llama.readyTimeoutS,
         logDir,
       }),
@@ -355,6 +394,7 @@ function createServices(cfg, { logDir = path.join(REPO_ROOT, 'logs') } = {}) {
         env: { PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
         isReady: () => portOpen(port),
         port,
+        match: '-m gvision',
         readyTimeoutS: cfg.python.readyTimeoutS,
         logDir,
       }),
@@ -373,7 +413,10 @@ module.exports = {
   llamaCommand,
   loadConfig,
   merge,
+  listeningPids,
   parseNetstat,
+  parsePidList,
+  pidsByCommandLine,
   portOpen,
   pythonCandidates,
   pythonCommand,

@@ -9,6 +9,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 const { app, BrowserWindow, globalShortcut, ipcMain, screen, shell } = require('electron');
 const { parseMessage, validateMessage, makeMessage } = require('./protocol');
 const { CONFIG_FILE, REPO_ROOT, createServices, loadConfig, serviceCommands } = require('./services');
@@ -146,6 +147,31 @@ function serviceAction(name, action) {
   s[action]().catch((err) => s._set('failed', err.message));
 }
 
+// Update button: stop the services, then pull and reinstall what changed and
+// start again. On Windows the launcher does that in a visible console window.
+async function updateAndRestart() {
+  quitting = true;
+  await Promise.allSettled(services.map((s) => s.stop()));
+  if (process.platform === 'win32') {
+    const launcher = path.join(REPO_ROOT, 'G-VISION.bat');
+    const extra = MODE === 'demo' ? ' --demo' : '';
+    // Verbatim so cmd sees the quotes around a path with spaces as written.
+    spawn('cmd.exe', ['/c', `start "G-VISION update" "${launcher}"${extra}`], {
+      detached: true,
+      stdio: 'ignore',
+      windowsVerbatimArguments: true,
+    }).unref();
+  } else {
+    const r = require('node:child_process').spawnSync(process.execPath, [path.join(__dirname, 'update.js')], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      stdio: 'inherit',
+    });
+    if (r.error) console.error('[update]', r.error);
+    app.relaunch();
+  }
+  app.exit(0);
+}
+
 app.whenReady().then(() => {
   ipcMain.handle('gvision:send', (_event, msg) => {
     // A clear from the panel must reach the overlay even with no bridge.
@@ -156,6 +182,7 @@ app.whenReady().then(() => {
   ipcMain.handle('gvision:services', () => servicesState());
   ipcMain.handle('gvision:restart-service', (_event, name) => serviceAction(name, 'restart'));
   ipcMain.handle('gvision:stop-service', (_event, name) => serviceAction(name, 'stop'));
+  ipcMain.handle('gvision:update', () => updateAndRestart());
   ipcMain.handle('gvision:open-logs', () => {
     fs.mkdirSync(LOG_DIR, { recursive: true });
     return shell.openPath(LOG_DIR);

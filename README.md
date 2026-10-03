@@ -90,8 +90,14 @@ first run into `python/models/` and the current folder; neither is committed.
 ## Start everything with one click (Windows)
 
 Double-click `G-VISION.bat` in the repository folder (right-click it and pick
-*Send to > Desktop (create shortcut)* to get a desktop icon). From Git Bash,
-`cd app && npm start` does the same. The app starts Qwen in llama-server and
+*Send to > Desktop (create shortcut)* to get a desktop icon). It first pulls
+the latest version with `git pull --ff-only` and reinstalls the app's npm
+packages or the Python package (`pip install -e ".[dev,perception,voice]"`)
+only when `app/package-lock.json` or `python/pyproject.toml` changed; if you
+are offline or have local edits that conflict, it says so and starts the
+version you have. **Update and restart** in the control panel does the same
+without closing anything by hand. From Git Bash, `cd app && npm start` starts
+the app without updating. The app starts Qwen in llama-server and
 the Python backend (`python -m gvision --live --agent`) on its own, shows each
 one's state in the control panel under **Startup** (with Start/Restart and Stop
 buttons and the last error if one fails), and stops both when you close the
