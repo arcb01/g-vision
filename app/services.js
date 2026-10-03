@@ -29,8 +29,9 @@ const DEFAULTS = {
   },
   python: {
     enabled: true,
-    // Relative to python/ in this repo.
-    exe: IS_WIN ? '.venv/Scripts/python.exe' : '.venv/bin/python',
+    // Relative to python/ in this repo. null: the first virtual environment
+    // found among $VIRTUAL_ENV, python/.venv and .venv at the repo root.
+    exe: null,
     args: ['--live', '--agent'],
     port: 8765,
     readyTimeoutS: 120,
@@ -59,9 +60,18 @@ function expandPath(p, baseDir) {
   return path.resolve(baseDir, p);
 }
 
+const VENV_PYTHON = IS_WIN ? 'Scripts/python.exe' : 'bin/python';
+
+function pythonCandidates(pythonDir, env = process.env) {
+  const dirs = [];
+  if (env.VIRTUAL_ENV) dirs.push(env.VIRTUAL_ENV);
+  dirs.push(path.join(pythonDir, '.venv'), path.join(path.dirname(pythonDir), '.venv'));
+  return dirs.map((d) => path.join(d, VENV_PYTHON));
+}
+
 // Defaults <- config file <- mode (from the command line). Relative paths in
 // the llama section resolve against llama.dir, the Python exe against python/.
-function resolveConfig({ fileConfig = {}, mode = null, configDir = REPO_ROOT } = {}) {
+function resolveConfig({ fileConfig = {}, mode = null, configDir = REPO_ROOT, env = process.env } = {}) {
   let cfg = merge(DEFAULTS, fileConfig);
   if (mode) {
     if (!MODES[mode]) throw new Error(`unknown mode "${mode}" (expected ${Object.keys(MODES).join(', ')})`);
@@ -77,7 +87,18 @@ function resolveConfig({ fileConfig = {}, mode = null, configDir = REPO_ROOT } =
       model: expandPath(cfg.llama.model, llamaDir),
       mmproj: cfg.llama.mmproj ? expandPath(cfg.llama.mmproj, llamaDir) : null,
     },
-    python: { ...cfg.python, dir: pythonDir, exe: expandPath(cfg.python.exe, pythonDir) },
+    python: { ...cfg.python, dir: pythonDir, ...resolvePython(cfg.python.exe, pythonDir, env) },
+  };
+}
+
+function resolvePython(exe, pythonDir, env) {
+  if (exe) return { exe: expandPath(exe, pythonDir), notFound: null };
+  const candidates = pythonCandidates(pythonDir, env);
+  const found = candidates.find((c) => fs.existsSync(c));
+  if (found) return { exe: found, notFound: null };
+  return {
+    exe: candidates[0],
+    notFound: `no Python environment found; looked for ${candidates.join(', ')}. Set python.exe in gvision.config.json`,
   };
 }
 
@@ -99,7 +120,7 @@ function pythonCommand(py, llamaPort) {
   if (py.args.includes('--agent') && !py.args.includes('--qwen-url')) {
     args.push('--qwen-url', `http://127.0.0.1:${llamaPort}`);
   }
-  return { name: 'backend', label: 'Python backend', exe: py.exe, args, cwd: py.dir };
+  return { name: 'backend', label: 'Python backend', exe: py.exe, args, cwd: py.dir, notFound: py.notFound };
 }
 
 function portOpen(port, host = '127.0.0.1', timeoutMs = 500) {
@@ -129,9 +150,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // One child process: spawn, wait until `isReady()` passes, keep the last log
 // lines for the panel, stop the whole process tree on quit.
 class Service extends EventEmitter {
-  constructor({ name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir }) {
+  constructor({ name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound = null }) {
     super();
-    Object.assign(this, { name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir });
+    Object.assign(this, { name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound });
     this.state = 'stopped';
     this.detail = '';
     this.child = null;
@@ -160,7 +181,7 @@ class Service extends EventEmitter {
     }
     this.external = false;
     if (!fs.existsSync(this.exe)) {
-      this._set('failed', `not found: ${this.exe}`);
+      this._set('failed', this.notFound || `not found: ${this.exe}`);
       return;
     }
     if (this.cwd && !fs.existsSync(this.cwd)) {
@@ -280,6 +301,7 @@ module.exports = {
   loadConfig,
   merge,
   portOpen,
+  pythonCandidates,
   pythonCommand,
   resolveConfig,
 };
