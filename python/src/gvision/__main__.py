@@ -58,7 +58,12 @@ async def _live(args: argparse.Namespace, bridge: Bridge, stop: asyncio.Event) -
     prompts += [w for w in watch if w not in prompts]
     source = open_source(args.source)
     detector = await asyncio.to_thread(YoloeDetector, prompts, args.model, device=args.device)
-    settings = LiveSettings(rate_hz=args.rate, watch=set(watch), spotlight=args.spotlight)
+    # With the agent, the spotlight follows every watch for as long as the
+    # target is tracked, and only watched objects are drawn.
+    settings = LiveSettings(
+        rate_hz=args.rate, watch=set(watch), spotlight=args.spotlight or args.agent,
+        show_all=args.show_all or not args.agent,
+    )
     log.info("live: detecting %s at %.0f Hz, glowing %s", prompts, args.rate, watch or "nothing")
     world = None
     jobs = []
@@ -120,6 +125,7 @@ def main() -> None:
     live.add_argument("--prompts", default="person", help="comma-separated YOLOE text prompts")
     live.add_argument("--watch", default=None, help="comma-separated labels that always glow gold (default: person, none with --agent)")
     live.add_argument("--spotlight", action="store_true", help="also dim the screen around watched objects")
+    live.add_argument("--show-all", action="store_true", help="outline every tracked object, not only watched ones")
     live.add_argument("--model", default="yoloe-26s-seg.pt", help="YOLOE weights, downloaded to models/")
     live.add_argument("--device", default=None, help="torch device, e.g. cuda:0 or cpu")
     live.add_argument("--rate", type=float, default=10.0, help="detector rate in Hz (plan: 5-15)")

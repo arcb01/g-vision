@@ -122,14 +122,18 @@ Python process.
    python -m gvision --live --agent --prompts person
    ```
 
-Hold **Alt+3**, ask "where's the cow?" and let go. The panel shows what was
-heard; Qwen calls `set_watch(["cow"])`, "cow" is added to YOLOE's prompts,
-and once the tracker confirms one it glows gold, the screen dims around it
-and Kokoro answers ("The cow is on your left."). If nothing turns up within
-1.5 s the answer says so and the watch stays on, so the glow appears as soon
-as one comes into view. Each new push-to-talk replaces the previous watch;
-`Ctrl+Shift+X` clears everything and stops speech. Ask "how many people are
-there?" for a count, or "stop highlighting" to clear.
+Hold **Alt+3**, ask "where's the cow?" and let go. While you talk, a cyan
+voice wave at the bottom of the screen follows your voice; then it shows what
+was heard while Qwen thinks. Qwen calls `set_watch(["cow"])`, "cow" is added
+to YOLOE's prompts, and once the tracker confirms one it glows gold with the
+screen dimmed around it. The answer ("The cow is in the center.") is spoken by
+Kokoro with a gold wave and a caption. The glow and spotlight stay on for as
+long as the cow is tracked; only what you asked for is outlined
+(`--show-all` outlines every tracked object, for debugging). If nothing turns
+up within 1.5 s the answer says so and the watch stays on, so the glow appears
+as soon as one comes into view. Each new push-to-talk replaces the previous
+watch; `Ctrl+Shift+X` clears everything and stops speech. Ask "how many
+people are there?" for a count, or "stop highlighting" to clear.
 
 Useful options: `--ptt-key f8` (any key, or a combo like `ctrl+shift+space`), `--whisper-model small` (faster, less
 VRAM), `--asr nemotron` (needs `transformers`; much worse on accented English
@@ -181,7 +185,7 @@ highlights and dimming. The app reconnects on its own if the bridge restarts.
 
 Python and Electron exchange JSON messages over `ws://127.0.0.1:8765`
 (plan section 12): `objects`, `highlight`, `focus`, `dim`, `answer`,
-`segment_started`, `answer_finished`, `badges`, `status`, `voice`, `clear`
+`segment_started`, `answer_finished`, `badges`, `status`, `voice` (push-to-talk state and voice loudness), `clear`
 and `config_changed`. Every message carries `v` (protocol version), `type` and
 `ts`; coordinates are normalized to 0..1; elements are addressed by reference
 IDs such as `obj:22`, `text:7` or `region:top_right`.

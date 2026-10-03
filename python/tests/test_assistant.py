@@ -7,7 +7,7 @@ from gvision.agent.qwen import Reply
 from gvision.assistant import Assistant
 from gvision.perception.detector import Detection
 from gvision.perception.live import LivePipeline, LiveSettings
-from gvision.protocol import ClearMsg, DimMsg, FocusMsg, HighlightMsg, dump, parse
+from gvision.protocol import ClearMsg, DimMsg, FocusMsg, HighlightMsg, ObjectsMsg, dump, parse
 from gvision.world import WorldState
 from test_agent import FakeQwen, tool_reply
 from test_live import FakeBridge
@@ -68,9 +68,10 @@ def test_spoken_request_end_to_end():
         world = WorldState()
         bridge = FakeBridge()
         det = FakeDetector(["person"])
-        pipe = LivePipeline(bridge, FakeSource(), det, LiveSettings(rate_hz=50), world=world)
+        settings = LiveSettings(rate_hz=50, spotlight=True, show_all=False)
+        pipe = LivePipeline(bridge, FakeSource(), det, settings, world=world)
         qwen = FakeQwen(tool_reply("set_watch", targets=["cow"]), Reply("The cow is on your left."))
-        assistant = Assistant(bridge, world, Agent(qwen, world), hold_s=0.05)
+        assistant = Assistant(bridge, world, Agent(qwen, world))
         stop = asyncio.Event()
         loop = asyncio.create_task(pipe.run(stop))
         answer = await assistant.submit("where's the cow")
@@ -87,8 +88,13 @@ def test_spoken_request_end_to_end():
     cow_ref = answer.refs[0]
     assert any(isinstance(m, HighlightMsg) and m.ref == cow_ref and m.color_role == "target" for m in sent)
     assert any(isinstance(m, FocusMsg) and m.refs == [cow_ref] for m in sent)
-    dims = [m.on for m in sent if isinstance(m, DimMsg)]
-    assert dims[0] is True and dims[-1] is False  # spotlight lifts after the hold
+    # The spotlight stays on for as long as the cow is tracked, not just while speaking.
+    last_answer = max(i for i, m in enumerate(sent) if m.type == "answer_finished")
+    assert any(isinstance(m, DimMsg) and m.on for m in sent[last_answer:])
+    assert not any(isinstance(m, DimMsg) and not m.on for m in sent)
+    # Only the cow reaches the overlay, although YOLOE also tracks the person.
+    labels = {o.label for m in sent if isinstance(m, ObjectsMsg) for o in m.objects}
+    assert labels == {"cow"}
 
 
 def test_dismiss_cancels_and_clears_watches():
@@ -114,3 +120,28 @@ def test_dismiss_cancels_and_clears_watches():
     task, world = asyncio.run(run())
     assert task.cancelled()
     assert not world.watches
+
+
+def test_spotlight_survives_brief_loss_and_lifts_when_cleared():
+    world = WorldState()
+    det = FakeDetector(["cow"])
+    pipe = LivePipeline(FakeBridge(), FakeSource(), det, LiveSettings(spotlight=True, show_all=False), world=world)
+    world.set_watch("cow")
+    cow = [Detection((0.1, 0.4, 0.2, 0.5), 0.9, "cow")]
+    for i in range(4):
+        pipe.step(i * 0.1, cow)
+    gap = pipe.step(0.45, [])  # occluded for one frame: track is lost, not gone
+    assert any(isinstance(m, DimMsg) and m.on for m in gap)
+    world.clear_watch()
+    after = pipe.step(0.5, cow)
+    assert any(isinstance(m, DimMsg) and not m.on for m in after)
+    assert not any(isinstance(m, ObjectsMsg) and m.objects for m in after)
+
+
+def test_voice_levels():
+    from gvision.audio.mic import envelope, loudness
+
+    assert loudness(np.zeros(100, np.float32)) == 0.0
+    assert 0.3 < loudness(np.full(100, 0.1, np.float32)) < 1.0
+    tone = np.sin(np.linspace(0, 400, 24000)).astype(np.float32) * 0.2
+    assert len(envelope(tone, 24000, 20)) == 20

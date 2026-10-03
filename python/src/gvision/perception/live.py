@@ -26,6 +26,7 @@ from gvision.protocol import (
     Box,
     ColorRole,
     ClearMsg,
+    ConfigChangedMsg,
     DimMsg,
     FocusMsg,
     HighlightMsg,
@@ -55,6 +56,8 @@ class LiveSettings:
     watch: set[str] = field(default_factory=set)
     spotlight: bool = False
     dim_strength: float = DimMsg.model_fields["strength"].default
+    show_all: bool = True
+    """Send every track to the overlay (faint debug outlines), not only watched ones."""
 
 
 def to_message(tr: Track) -> TrackedObject:
@@ -94,6 +97,10 @@ class LivePipeline:
             # Dismiss: drop the current glows; tracks that appear later still glow.
             self.dismissed |= {tr.ref for tr in self.tracker.tracks}
             self._dimmed = False
+        elif isinstance(msg, ConfigChangedMsg):
+            strength = msg.changes.get("visual_effects.dim_strength")
+            if isinstance(strength, (int, float)) and 0 <= strength <= 1:
+                self.settings.dim_strength = float(strength)
 
     def watch_roles(self) -> dict[str, ColorRole]:
         """Label -> glow color for everything currently watched."""
@@ -106,11 +113,11 @@ class LivePipeline:
         """YOLOE prompts: the startup ones plus every watched target."""
         return self.base_prompts + [t for t in self.watch_roles() if t not in self.base_prompts]
 
-    def watched(self, tracks: list[Track]) -> list[Track]:
+    def watched(self, tracks: list[Track], statuses: tuple[str, ...] = ("confirmed",)) -> list[Track]:
         roles = self.watch_roles()
         return [
             tr for tr in tracks
-            if tr.status == "confirmed" and tr.label in roles and tr.ref not in self.dismissed
+            if tr.status in statuses and tr.label in roles and tr.ref not in self.dismissed
         ]
 
     def step(self, frame_ts: float, detections: list[Detection]) -> list[Message]:
@@ -130,15 +137,21 @@ class LivePipeline:
                 self._watch_version = self.world.watch_version
                 self.dismissed.clear()
                 out.append(ClearMsg(reason="watches changed"))
+        roles = self.watch_roles()
+        if not self.settings.show_all:
+            # Only what was asked for reaches the overlay; Qwen still sees everything.
+            objects = [o for o in objects if o.label in roles]
         out.append(ObjectsMsg(frame_ts=frame_ts, objects=objects))
         targets = self.watched(tracks)
-        roles = self.watch_roles()
         # Highlights, focus and dim are idempotent in the overlay, so they are
         # resent every step: an app that connects late still gets them.
         out += [HighlightMsg(ref=tr.ref, color_role=roles[tr.label]) for tr in targets]
         if self.settings.spotlight:
-            if targets:
-                out.append(FocusMsg(refs=[tr.ref for tr in targets]))
+            # Lost tracks keep the spotlight for their short grace period, so
+            # a brief occlusion doesn't flash the dimming off and on.
+            spot = self.watched(tracks, ("confirmed", "lost"))
+            if spot:
+                out.append(FocusMsg(refs=[tr.ref for tr in spot]))
                 out.append(DimMsg(on=True, strength=self.settings.dim_strength))
                 self._dimmed = True
             elif self._dimmed:
