@@ -198,3 +198,42 @@ def test_hud_numbers_are_routed_to_read_text():
 
     about = TEXT_TOOLS[0]["function"]["parameters"]["properties"]["about"]["description"]
     assert "'quest'" not in about  # Qwen copied the example into every call
+
+
+
+def test_text_without_the_answer_falls_back_to_look():
+    from gvision.agent.tools import ToolResult
+
+    world = WorldState()
+    seen = []
+    tools = look_executor(world, seen)
+    tools.text = type("Text", (), {"timing_ms": {}})()  # offer the text tools
+
+    async def read_text(about=None, where=None):
+        return ToolResult({"note": "no text mentions 'ammo'; this is all the text there",
+                           "text": [{"ref": "text:4", "text": "Ashley", "where": "bottom right"}]})
+
+    tools.read_text = read_text
+    agent = Agent(FakeQwen(tool_reply("read_text", about="ammo")), world, tools)
+    answer = asyncio.run(agent.handle("How many bullets do I have left?"))
+    assert seen == [("How many bullets do I have left?", 0)]
+    assert answer.text == "You have 10 bullets." and answer.tool_calls == ["read_text", "look"]
+    assert "No matching text: look instead" in [s.title for s in answer.steps]
+
+
+def test_text_that_answers_does_not_look():
+    from gvision.agent.tools import ToolResult
+
+    world = WorldState()
+    seen = []
+    tools = look_executor(world, seen)
+    tools.text = type("Text", (), {"timing_ms": {}})()
+
+    async def read_text(about=None, where=None):
+        return ToolResult({"text": [{"ref": "text:4", "text": "AMMO 10", "where": "bottom right"}]})
+
+    tools.read_text = read_text
+    tools.text_cues = lambda answer, results: []
+    agent = Agent(FakeQwen(tool_reply("read_text", about="ammo"), Reply("You have 10 bullets.")), world, tools)
+    answer = asyncio.run(agent.handle("How many bullets do I have left?"))
+    assert seen == [] and answer.tool_calls == ["read_text"]
