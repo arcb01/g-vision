@@ -15,6 +15,7 @@ const PULSE_HZ = 1; // slow, well below flashing (plan 6.3)
 const PULSE_DEPTH = 0.2;
 // Developer aid until the debug overlay exists: show unhighlighted tracks faintly.
 const SHOW_ALL_TRACKS = true;
+const LOST_ALPHA = 0.4; // lost tracks stay at their last position, faded (plan 5.4)
 
 const state = {
   objects: { frameTs: 0, list: [] },
@@ -25,9 +26,18 @@ const state = {
 
 function handle(msg) {
   switch (msg.type) {
-    case 'objects':
+    case 'objects': {
       state.objects = { frameTs: msg.frame_ts, list: msg.objects };
+      // Forget highlights and focus on tracks the tracker has removed.
+      const live = new Set(msg.objects.map((o) => o.ref));
+      for (const ref of state.highlights.keys()) {
+        if (ref.startsWith('obj:') && !live.has(ref)) state.highlights.delete(ref);
+      }
+      for (const ref of state.focus) {
+        if (ref.startsWith('obj:') && !live.has(ref)) state.focus.delete(ref);
+      }
       break;
+    }
     case 'highlight':
       state.highlights.set(msg.ref, msg);
       break;
@@ -48,11 +58,16 @@ function handle(msg) {
   }
 }
 
-// Shift boxes by tracker velocity to hide display delay (plan 5.5).
+// Shift boxes and outlines by tracker velocity to hide display delay (plan 5.5).
 function extrapolated(obj, nowS) {
   const dt = Math.min(Math.max(nowS - state.objects.frameTs, 0), MAX_EXTRAPOLATION_S);
   const [vx, vy] = obj.velocity;
-  return { x: obj.box.x + vx * dt, y: obj.box.y + vy * dt, w: obj.box.w, h: obj.box.h };
+  const dx = vx * dt;
+  const dy = vy * dt;
+  return {
+    box: { x: obj.box.x + dx, y: obj.box.y + dy, w: obj.box.w, h: obj.box.h },
+    outline: obj.outline ? obj.outline.map(([x, y]) => [x + dx, y + dy]) : null,
+  };
 }
 
 // Everything that can be drawn this frame: tracked objects, plus highlighted
@@ -63,10 +78,10 @@ function elements(nowS) {
   for (const obj of state.objects.list) {
     tracked.add(obj.ref);
     if (obj.status === 'tentative') continue; // only confirmed objects glow
-    out.push({ ref: obj.ref, label: obj.label, box: extrapolated(obj, nowS) });
+    out.push({ ref: obj.ref, label: obj.label, lost: obj.status === 'lost', ...extrapolated(obj, nowS) });
   }
   for (const [ref, hl] of state.highlights) {
-    if (!tracked.has(ref) && hl.box) out.push({ ref, label: null, box: hl.box });
+    if (!tracked.has(ref) && hl.box) out.push({ ref, label: null, lost: false, box: hl.box, outline: null });
   }
   return out;
 }
@@ -98,7 +113,10 @@ async function main() {
     const els = elements(nowS).map((el) => ({
       ...el,
       px: { x: el.box.x * W, y: el.box.y * H, w: el.box.w * W, h: el.box.h * H },
+      poly: el.outline ? el.outline.flatMap(([x, y]) => [x * W, y * H]) : null,
     }));
+    // Mask outline when the detector gave one, otherwise the rounded box.
+    const shape = (g, { px, poly }) => (poly ? g.poly(poly, true) : g.roundRect(px.x, px.y, px.w, px.h, 6));
 
     // Dim layer with cut-outs around focused elements (box-shaped for now).
     dimLayer.clear();
@@ -114,23 +132,24 @@ async function main() {
     glowLayer.clear();
     outlineLayer.clear();
     const seen = new Set();
-    for (const { ref, label: text, px } of els) {
+    for (const el of els) {
+      const { ref, label: text, px, lost } = el;
       const hl = state.highlights.get(ref);
       if (!hl && !SHOW_ALL_TRACKS) continue;
       const focused = state.focus.has(ref);
       const color = hl ? COLORS[hl.color_role] : SUBTLE;
-      const r = 6;
+      const fade = lost ? LOST_ALPHA : 1;
 
-      let alpha = 0.25; // unhighlighted debug track
+      let alpha = 0.25 * fade; // unhighlighted debug track
       if (hl) {
-        alpha = focused || state.focus.size === 0 ? 1 : 0.7;
-        const glowAlpha = focused ? pulse : 0.5;
-        glowLayer.roundRect(px.x, px.y, px.w, px.h, r).stroke({ width: GLOW_WIDTH_PX, color, alpha: glowAlpha });
-        if (focused) glowLayer.roundRect(px.x, px.y, px.w, px.h, r).fill({ color, alpha: 0.12 * pulse });
+        alpha = (focused || state.focus.size === 0 ? 1 : 0.7) * fade;
+        const glowAlpha = (focused ? pulse : 0.5) * fade;
+        shape(glowLayer, el).stroke({ width: GLOW_WIDTH_PX, color, alpha: glowAlpha, join: 'round' });
+        if (focused) shape(glowLayer, el).fill({ color, alpha: 0.12 * pulse * fade });
       }
       const core = focused ? CORE_WIDTH_PX.focused : CORE_WIDTH_PX.mentioned;
-      outlineLayer.roundRect(px.x, px.y, px.w, px.h, r).stroke({ width: core + 4, color: 0x000000, alpha: alpha * 0.7 });
-      outlineLayer.roundRect(px.x, px.y, px.w, px.h, r).stroke({ width: core, color, alpha });
+      shape(outlineLayer, el).stroke({ width: core + 4, color: 0x000000, alpha: alpha * 0.7, join: 'round' });
+      shape(outlineLayer, el).stroke({ width: core, color, alpha, join: 'round' });
 
       if (text == null) continue;
       let label = labels.get(ref);

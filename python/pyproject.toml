@@ -14,7 +14,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# Tracking runs anywhere; the rest of perception needs Windows + an NVIDIA GPU.
+# Install a CUDA build of torch first (see README), or pip pulls the CPU one.
+tracking = ["numpy>=1.26", "scipy>=1.11"]
+perception = [
+    "gvision[tracking]",
+    "ultralytics>=8.4.172",  # first version tested; uses quantize= instead of half=
+    "opencv-python>=4.9",
+    "dxcam>=0.0.5; sys_platform == 'win32'",
+]
+dev = ["pytest>=8", "gvision[tracking]"]
 
 [project.scripts]
 gvision = "gvision.__main__:main"
