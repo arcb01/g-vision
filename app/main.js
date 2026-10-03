@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { app, BrowserWindow, globalShortcut, ipcMain, screen, shell } = require('electron');
 const { parseMessage, validateMessage, makeMessage } = require('./protocol');
-const { CONFIG_FILE, REPO_ROOT, createServices, loadConfig } = require('./services');
+const { CONFIG_FILE, REPO_ROOT, createServices, loadConfig, serviceCommands } = require('./services');
 
 const argv = process.argv.slice(1);
 const MODE = argv.includes('--demo') ? 'demo' : null;
@@ -129,6 +129,23 @@ function startServices() {
   }
 }
 
+// Start, restart or stop one service from the panel. A (re)start re-reads
+// gvision.config.json, so a fixed path applies without relaunching the app.
+function serviceAction(name, action) {
+  const s = services.find((x) => x.name === name);
+  if (!s) return;
+  if (action === 'restart') {
+    try {
+      const cmd = serviceCommands(loadConfig(MODE))[name];
+      if (cmd) s.update(cmd);
+    } catch (err) {
+      s._set('failed', `${CONFIG_FILE}: ${err.message}`);
+      return;
+    }
+  }
+  s[action]().catch((err) => s._set('failed', err.message));
+}
+
 app.whenReady().then(() => {
   ipcMain.handle('gvision:send', (_event, msg) => {
     // A clear from the panel must reach the overlay even with no bridge.
@@ -137,10 +154,8 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('gvision:connection', () => ({ connected, url: BRIDGE_URL }));
   ipcMain.handle('gvision:services', () => servicesState());
-  ipcMain.handle('gvision:restart-service', (_event, name) => {
-    const s = services.find((x) => x.name === name);
-    if (s) s.restart().catch((err) => console.error(`[${name}]`, err));
-  });
+  ipcMain.handle('gvision:restart-service', (_event, name) => serviceAction(name, 'restart'));
+  ipcMain.handle('gvision:stop-service', (_event, name) => serviceAction(name, 'stop'));
   ipcMain.handle('gvision:open-logs', () => {
     fs.mkdirSync(LOG_DIR, { recursive: true });
     return shell.openPath(LOG_DIR);

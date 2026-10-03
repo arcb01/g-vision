@@ -99,3 +99,78 @@ test('a missing Python environment says where it looked', async () => {
     assert.ok(fs.existsSync(cfg.python.exe));
   }
 });
+
+test('netstat output gives the PIDs listening on a port', () => {
+  const { parseNetstat } = require('../services');
+  const out = [
+    '  Proto  Local Address          Foreign Address        State           PID',
+    '  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1100',
+    '  TCP    127.0.0.1:8080         0.0.0.0:0              LISTENING       4242',
+    '  TCP    127.0.0.1:8080         127.0.0.1:50123        ESTABLISHED     4242',
+    '  TCP    127.0.0.1:50123        127.0.0.1:8080         ESTABLISHED     7777',
+    '  TCP    127.0.0.1:18080        0.0.0.0:0              LISTENING       5555',
+    '  TCP    [::1]:8765             [::]:0                 ESCUCHANDO      6060',
+  ].join('\r\n');
+  assert.deepStrictEqual(parseNetstat(out, 8080), [4242]);
+  assert.deepStrictEqual(parseNetstat(out, 8765), [6060]);
+  assert.deepStrictEqual(parseNetstat(out, 9999), []);
+});
+
+function fakeServer(port) {
+  return `require('node:net').createServer().listen(${port}, '127.0.0.1'); console.log('up');`;
+}
+
+function fakeService(port, extra = {}) {
+  return new Service({
+    name: 'fake', label: 'Fake', exe: process.execPath, args: ['-e', fakeServer(port)], cwd: os.tmpdir(),
+    isReady: () => portOpen(port), readyTimeoutS: 10, port, ...extra,
+  });
+}
+
+test('restart replaces the process and stop can interrupt a start', async () => {
+  const port = 41000 + Math.floor(Math.random() * 1000);
+  const svc = fakeService(port);
+  await svc.start();
+  const first = svc.child.pid;
+  await svc.restart();
+  assert.strictEqual(svc.state, 'ready');
+  assert.notStrictEqual(svc.child.pid, first);
+  await svc.stop();
+  assert.strictEqual(svc.state, 'stopped');
+
+  const slow = fakeService(port, { args: ['-e', `setTimeout(() => {}, 60000)`] });
+  const starting = slow.start();
+  await new Promise((r) => setTimeout(r, 300));
+  assert.strictEqual(slow.state, 'starting');
+  await slow.stop();
+  await starting;
+  assert.strictEqual(slow.state, 'stopped');
+});
+
+test('stop and restart also work on a server found already running',
+  { skip: process.platform !== 'win32' && !require('node:child_process').spawnSync('lsof', ['-v']).pid },
+  async () => {
+    const port = 42000 + Math.floor(Math.random() * 1000);
+    const { spawn } = require('node:child_process');
+    const orphan = spawn(process.execPath, ['-e', fakeServer(port)], { stdio: 'ignore' });
+    const orphanExit = new Promise((r) => orphan.once('exit', r));
+    while (!(await portOpen(port))) await new Promise((r) => setTimeout(r, 50));
+    const svc = fakeService(port);
+    await svc.start();
+    assert.strictEqual(svc.detail, 'already running');
+    await svc.restart();
+    await orphanExit;
+    assert.strictEqual(svc.state, 'ready');
+    assert.ok(svc.child, 'restart should start its own process');
+    await svc.stop();
+    assert.strictEqual(await portOpen(port), false);
+  });
+
+test('update changes the command used by the next start', async () => {
+  const svc = new Service({ name: 'u', exe: '/no/such/exe', args: [], isReady: async () => false, readyTimeoutS: 1 });
+  await svc.start();
+  assert.strictEqual(svc.state, 'failed');
+  svc.update({ exe: '/still/missing', args: [], cwd: undefined, notFound: 'custom hint' });
+  await svc.restart();
+  assert.strictEqual(svc.detail, 'custom hint');
+});
