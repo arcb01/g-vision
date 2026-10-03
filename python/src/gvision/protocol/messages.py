@@ -70,6 +70,21 @@ class Segment(_Model):
     refs: list[Ref] = []
 
 
+StepKind = Literal["asr", "llm", "detector", "ocr", "vision", "tool", "tts"]
+
+
+class Step(_Model):
+    """One thing done to answer a question, for the panel's log."""
+
+    kind: StepKind
+    title: str
+    detail: str | None = None
+    """What went in and came out: the transcript, the tool's arguments and result..."""
+    ms: float | None = None
+    ok: bool = True
+    """False for an error or a fallback."""
+
+
 class Badge(_Model):
     number: Annotated[int, Field(ge=1)]
     ref: Ref
@@ -180,6 +195,8 @@ class ExchangeMsg(_Message):
     tools: list[str] = []
     """Tools the agent called to answer, in order."""
     latency_ms: dict[str, float] = {}
+    steps: list[Step] = []
+    """What it took, in order: speech-to-text, Qwen calls, tools, voice."""
     screenshot: str | None = None
     """What was on screen when it was asked: a ``data:image/jpeg;base64,`` URL.
     The overlay is excluded from capture, so this is the game alone."""

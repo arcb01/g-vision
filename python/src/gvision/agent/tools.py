@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from gvision.protocol import Step, StepKind
 from gvision.world import WorldState, normalize_target, where
 
 if TYPE_CHECKING:
@@ -139,6 +140,21 @@ class ToolResult:
         return json.dumps(self.content)
 
 
+STEP_TITLES: dict[str, tuple[StepKind, str]] = {
+    "set_watch": ("detector", "Detector: find and highlight"),
+    "clear_watch": ("detector", "Stop highlighting"),
+    "query_state": ("tool", "Check what is tracked"),
+    "read_text": ("ocr", "OCR: read the screen"),
+    "recent_text": ("ocr", "OCR: text seen recently"),
+    "look": ("vision", "Qwen vision: look at recent frames"),
+}
+
+
+def brief(value: Any, limit: int = 400) -> str:
+    text = json.dumps(value, ensure_ascii=False)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 class ToolExecutor:
     def __init__(
         self, world: WorldState, find_timeout: float = FIND_TIMEOUT_S, text: TextWatcher | None = None,
@@ -183,6 +199,14 @@ class ToolExecutor:
         except TypeError as e:  # wrong or missing arguments
             return ToolResult({"error": f"bad arguments for {name}: {e}"})
         return ToolResult({"error": f"unknown tool {name}"})
+
+    def step(self, name: str, args: dict[str, Any], result: ToolResult, ms: float) -> Step:
+        """The panel log's line for one tool call: what went in, what came back."""
+        kind, title = STEP_TITLES.get(name, ("tool", name))
+        detail = f"{name}({brief(args, 200)})\n→ {brief(result.content)}"
+        if kind == "ocr" and self.text and self.text.timing_ms:
+            detail += "\nRapidOCR " + ", ".join(f"{k} {v:.0f} ms" for k, v in self.text.timing_ms.items())
+        return Step(kind=kind, title=title, detail=detail, ms=round(ms, 1), ok="error" not in result.content)
 
     async def set_watch(self, targets: list[str] | str, color_role: str = "target") -> ToolResult:
         if isinstance(targets, str):

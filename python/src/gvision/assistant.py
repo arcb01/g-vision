@@ -16,6 +16,7 @@ import logging
 import sys
 import threading
 import time
+from collections.abc import Callable
 
 import httpx
 
@@ -32,6 +33,7 @@ from gvision.protocol import (
     Message,
     Segment,
     SegmentStartedMsg,
+    Step,
     VoiceMsg,
 )
 from gvision.snapshot import Encode, LatestFrame, encode
@@ -63,6 +65,7 @@ class Assistant:
         self._asked: tuple[float, str, object] | None = None
         """(time, "voice" or "typed", screen image) of the question being answered."""
         self._logging: set[asyncio.Task] = set()
+        self._asr_step: Step | None = None
         self._task: asyncio.Task | None = None
         self._meter: asyncio.Task | None = None
         self._ids = itertools.count(1)
@@ -114,7 +117,12 @@ class Assistant:
         self.bridge.send(VoiceMsg(state="thinking"))
         t0 = time.perf_counter()
         text = await asyncio.to_thread(self.asr.transcribe, audio)
-        log.info("heard %r (%.0f ms, %.1f s clip)", text, (time.perf_counter() - t0) * 1000, len(audio) / SAMPLE_RATE)
+        ms = (time.perf_counter() - t0) * 1000
+        log.info("heard %r (%.0f ms, %.1f s clip)", text, ms, len(audio) / SAMPLE_RATE)
+        self._asr_step = Step(
+            kind="asr", title=f"Speech-to-text: {getattr(self.asr, 'name', type(self.asr).__name__)}",
+            detail=f"heard {text!r} in a {len(audio) / SAMPLE_RATE:.1f} s clip", ms=round(ms, 1), ok=bool(text),
+        )
         if not text:
             self.bridge.send(VoiceMsg(state="idle", transcript=""))
             return
@@ -131,15 +139,29 @@ class Assistant:
 
     async def ask(self, text: str) -> Answer:
         self.bridge.send(VoiceMsg(state="thinking", transcript=text))
+        steps = [self._asr_step] if self._asr_step else []
+        self._asr_step = None
         try:
             answer = await self.agent.handle(text)
         except httpx.HTTPError as e:
             log.error("Qwen request failed: %s", e)
-            answer = Answer("I can't reach the language model right now.")
+            answer = Answer("I can't reach the language model right now.", steps=[
+                Step(kind="llm", title="Qwen request failed", detail=f"{type(e).__name__}: {e}", ok=False)])
         log.info("answer %r refs=%s tools=%s latency=%s", answer.text, answer.refs, answer.tool_calls,
                  {k: round(v) for k, v in answer.latency_ms.items()})
-        self._log_exchange(text, answer)
-        await self.present(answer)
+        steps += answer.steps
+        logged = False
+
+        def log_now(extra: list[Step]) -> None:  # once the voice is ready, or if cut short before
+            nonlocal logged
+            if not logged:
+                logged = True
+                self._log_exchange(text, answer, steps + extra)
+
+        try:
+            await self.present(answer, log_now)
+        finally:
+            log_now([])
         return answer
 
     # --- conversation log ----------------------------------------------------
@@ -147,15 +169,16 @@ class Assistant:
     def _remember_question(self, via: str) -> None:
         self._asked = (time.time(), via, self.screen.grab() if self.screen else None)
 
-    def _log_exchange(self, question: str, answer: Answer) -> None:
+    def _log_exchange(self, question: str, answer: Answer, steps: list[Step]) -> None:
         asked_ts, via, image = self._asked or (time.time(), "typed", None)
         self._asked = None
         exchange_id = f"x{int(asked_ts * 1000)}"
-        task = asyncio.create_task(self._send_exchange(exchange_id, asked_ts, via, image, question, answer))
+        task = asyncio.create_task(self._send_exchange(exchange_id, asked_ts, via, image, question, answer, steps))
         self._logging.add(task)  # keep a reference until it is sent
         task.add_done_callback(self._logging.discard)
 
-    async def _send_exchange(self, exchange_id, asked_ts, via, image, question: str, answer: Answer) -> None:
+    async def _send_exchange(self, exchange_id, asked_ts, via, image, question: str, answer: Answer,
+                             steps: list[Step]) -> None:
         screenshot = None
         if image is not None:
             try:
@@ -165,17 +188,25 @@ class Assistant:
         self.bridge.send(ExchangeMsg(
             exchange_id=exchange_id, asked_ts=asked_ts, question=question, answer=answer.text, via=via,
             tools=answer.tool_calls, latency_ms={k: round(v, 1) for k, v in answer.latency_ms.items()},
-            screenshot=screenshot,
+            steps=steps, screenshot=screenshot,
         ))
 
-    async def present(self, answer: Answer) -> None:
+    async def present(self, answer: Answer, ready: Callable[[list[Step]], None] | None = None) -> None:
         # Glow and spotlight are the live pipeline's job: they stay on for as
         # long as the watched target is tracked, not just while speaking.
         answer_id = f"a{next(self._ids)}"
         self.bridge.send(AnswerMsg(answer_id=answer_id, segments=[Segment(id=0, text=answer.text, refs=answer.refs)]))
         audio = None
+        tts_steps: list[Step] = []
         if self.tts:
+            t0 = time.perf_counter()
             audio = await asyncio.to_thread(self.tts.synthesize, answer.text)
+            tts_steps.append(Step(
+                kind="tts", title=f"Voice: Kokoro {getattr(self.tts, 'voice', '')}".strip(),
+                detail=f"{len(audio[0]) / audio[1]:.1f} s of speech", ms=round((time.perf_counter() - t0) * 1000, 1),
+            ))
+        if ready:
+            ready(tts_steps)
         text = self.agent.tools.text
         if text and answer.text_cues:
             text.show([ref for _, ref in answer.text_cues])

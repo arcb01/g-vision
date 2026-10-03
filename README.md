@@ -124,7 +124,11 @@ The control panel has three tabs:
   heard and the answer), the services, performance and the latest questions.
 - **Log**: every question as a conversation, newest first, with the time, a
   screenshot of the screen when it was asked (click it to enlarge), what was
-  heard, the answer and the tools used. It is kept in `logs/conversation/`
+  heard, the answer and the tools used. **How it answered** opens the steps
+  behind it, each with its time: speech-to-text, Qwen choosing a tool (with
+  the arguments), the detector, OCR or vision call and what it returned,
+  Qwen writing the answer (or the fallback when it didn't), and the voice.
+  Failed steps are red. It is kept in `logs/conversation/`
   across restarts (the newest 500 questions) and can be searched or cleared.
 - **Settings**: push-to-talk key, speech-to-text model, voice, whether to speak
   answers, read on-screen text, scene memory and how often to write situation

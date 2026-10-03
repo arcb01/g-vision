@@ -24,6 +24,7 @@ from gvision.protocol import (
     ExchangeMsg,
     FocusMsg,
     HighlightMsg,
+    Step,
     Message,
     ObjectsMsg,
     Segment,
@@ -94,6 +95,7 @@ async def _stream_status(bridge: Bridge, stop: asyncio.Event) -> None:
 _SIGN = Box(x=0.72, y=0.08, w=0.2, h=0.07)
 
 # (question, tool the agent would call, glow color, spoken segments)
+_TOOL_STEPS = {"set_watch": ("detector", "Detector: find and highlight"), "read_text": ("ocr", "OCR: read the screen")}
 _ANSWERS = [
     (
         "what's dangerous around me?",
@@ -137,6 +139,10 @@ async def _play_answers(bridge: Bridge, stop: asyncio.Event, settings: DemoSetti
         bridge.send(ExchangeMsg(
             exchange_id=f"demo-{time.time():.3f}", asked_ts=time.time() - 1.2, question=question, via="typed",
             answer=" ".join(seg.text for seg in script), tools=[tool], latency_ms={"llm_tool_call": 0.0},
+            steps=[
+                Step(kind="llm", title="Qwen chooses what to do", detail=f"called {tool}() (demo)", ms=0.0),
+                Step(kind=_TOOL_STEPS[tool][0], title=_TOOL_STEPS[tool][1], detail="scripted demo answer", ms=0.0),
+            ],
         ))
         bridge.send(AnswerMsg(answer_id=answer_id, segments=script))
         for ref in dict.fromkeys(ref for seg in script for ref in seg.refs):
