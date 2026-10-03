@@ -121,3 +121,23 @@ test('outside a git checkout it only reports that it skipped', () => {
   assert.strictEqual(r.pulled, false);
   assert.match(r.messages[0], /not a git checkout/);
 });
+
+test('after a Python install the GPU onnxruntime is put back if the CPU one replaced it', () => {
+  const { local } = setup();
+  const seen = [];
+  let cuda = false;
+  const run = (cmd, args, cwd) => {
+    if (cmd === 'git') {
+      const r = spawnSync(cmd, args, { cwd, encoding: 'utf8' });
+      return { ok: r.status === 0, out: `${r.stdout}${r.stderr}`.trim() };
+    }
+    if (args[0] === '-c') return { ok: cuda, out: '' };
+    seen.push(args.slice(2).join(' '));
+    if (args.includes('onnxruntime-gpu')) cuda = true;
+    return { ok: true, out: '' };
+  };
+  runUpdate({ repoRoot: local, run, log: quiet, python: 'python', gpu: true });
+  assert.deepStrictEqual(seen, ['install -e .[dev,perception,voice]', 'install --force-reinstall --no-deps onnxruntime-gpu']);
+  runUpdate({ repoRoot: local, run, log: quiet, python: 'python', gpu: true });
+  assert.strictEqual(seen.length, 2); // nothing changed: no install, no check
+});

@@ -23,7 +23,7 @@ import httpx
 from gvision.agent.agent import Agent, Answer
 from gvision.audio.asr import SpeechToText
 from gvision.audio.mic import SAMPLE_RATE, Recorder, envelope
-from gvision.audio.tts import KokoroTTS
+from gvision.audio.tts import KokoroTTS, split_sentences
 from gvision.bridge import Bridge
 from gvision.protocol import (
     AnswerFinishedMsg,
@@ -196,45 +196,89 @@ class Assistant:
         # long as the watched target is tracked, not just while speaking.
         answer_id = f"a{next(self._ids)}"
         self.bridge.send(AnswerMsg(answer_id=answer_id, segments=[Segment(id=0, text=answer.text, refs=answer.refs)]))
-        audio = None
+        # The voice is made one sentence at a time and starts after the first,
+        # while the next one is synthesized.
+        pieces = split_sentences(answer.text) if self.tts else []
+        audio: asyncio.Queue = asyncio.Queue()
+        synth = asyncio.create_task(self._synthesize(pieces, audio)) if pieces else None
         tts_steps: list[Step] = []
-        if self.tts:
-            t0 = time.perf_counter()
-            audio = await asyncio.to_thread(self.tts.synthesize, answer.text)
-            tts_steps.append(Step(
-                kind="tts", title=f"Voice: Kokoro {getattr(self.tts, 'voice', '')}".strip(),
-                detail=f"{len(audio[0]) / audio[1]:.1f} s of speech", ms=round((time.perf_counter() - t0) * 1000, 1),
-            ))
-        if ready:
-            ready(tts_steps)
-        text = self.agent.tools.text
-        if text and answer.text_cues:
-            text.show([ref for _, ref in answer.text_cues])
-        self.bridge.send(SegmentStartedMsg(answer_id=answer_id, segment_id=0))
-        self.bridge.send(VoiceMsg(state="speaking"))
-        duration = len(audio[0]) / audio[1] if audio is not None else len(answer.text) / CHARS_PER_S
-        cues = asyncio.create_task(self._light_text(answer.text_cues, duration)) if text and answer.text_cues else None
+        first = None
         try:
-            if audio is not None:
-                samples, rate = audio
+            if synth:
+                if hasattr(self.tts, "start"):
+                    self.tts.start()
+                t0 = time.perf_counter()
+                first = await audio.get()
+                if first is not None:
+                    speech = f"{len(first[0]) / first[1]:.1f} s of speech"
+                    device = getattr(self.tts, "device", "")
+                    tts_steps.append(Step(
+                        kind="tts", title=" ".join(filter(None, ["Voice: Kokoro", getattr(self.tts, "voice", ""),
+                                                                  device and f"on {device}"])),
+                        detail=speech if len(pieces) == 1 else f"first of {len(pieces)} sentences: {speech}",
+                        ms=round((time.perf_counter() - t0) * 1000, 1),
+                    ))
+            if ready:
+                ready(tts_steps)
+            text = self.agent.tools.text
+            cues = answer.text_cues if text else []
+            if cues:
+                text.show([ref for _, ref in cues])
+            self.bridge.send(SegmentStartedMsg(answer_id=answer_id, segment_id=0))
+            self.bridge.send(VoiceMsg(state="speaking"))
+            if first is not None:
+                await self._speak(first, pieces, audio, cues, len(answer.text))
+            elif cues:  # no voice: still walk through the text at reading pace
+                duration = len(answer.text) / CHARS_PER_S
+                await self._light_text([(at * duration, ref) for at, ref in cues])
+        finally:
+            if synth:
+                synth.cancel()
+        self.bridge.send(AnswerFinishedMsg(answer_id=answer_id))
+        self.bridge.send(VoiceMsg(state="idle"))
+
+    async def _synthesize(self, pieces: list[str], out: asyncio.Queue) -> None:
+        try:
+            for piece in pieces:
+                await out.put(await asyncio.to_thread(self.tts.synthesize, piece))
+        except Exception as e:  # say what is ready rather than nothing
+            log.error("voice failed: %s", e)
+        finally:
+            out.put_nowait(None)
+
+    async def _speak(self, first, pieces: list[str], audio: asyncio.Queue, cues: list[tuple[float, str]],
+                     length: int) -> None:
+        """Play each sentence as it is ready, lighting text when its words come."""
+        tasks: list[asyncio.Task] = []
+        start = 0  # where the sentence starts in the answer text
+        chunk = first
+        try:
+            for i, piece in enumerate(pieces):
+                if chunk is None or getattr(self.tts, "stopped", False):
+                    break
+                samples, rate = chunk
+                duration = len(samples) / rate
+                end = start + len(piece) if i < len(pieces) - 1 else max(length, start + 1)
+                mine = [((at * length - start) / max(end - start, 1) * duration, ref)
+                        for at, ref in cues if start <= at * length < end]
+                tasks.append(asyncio.create_task(self._light_text(mine)))
                 levels = asyncio.create_task(self._send_voice_levels(envelope(samples, rate, LEVEL_HZ)))
                 try:
                     await asyncio.to_thread(self.tts.play, samples, rate)
                 finally:
                     levels.cancel()
-            elif cues:
-                await cues  # no voice: still walk through the text at reading pace
+                start = end + 1
+                if i < len(pieces) - 1:
+                    chunk = await audio.get()
         finally:
-            if cues:
-                cues.cancel()
-        self.bridge.send(AnswerFinishedMsg(answer_id=answer_id))
-        self.bridge.send(VoiceMsg(state="idle"))
+            for t in tasks:
+                t.cancel()
 
-    async def _light_text(self, cues: list[tuple[float, str]], duration: float) -> None:
-        """Light each text block as the voice reaches the words that quote it."""
+    async def _light_text(self, cues: list[tuple[float, str]]) -> None:
+        """Light each text block at its time (seconds from now)."""
         start = time.monotonic()
         for at, ref in cues:
-            await asyncio.sleep(max(0.0, start + at * duration - time.monotonic()))
+            await asyncio.sleep(max(0.0, start + at - time.monotonic()))
             self.agent.tools.text.light(ref, segment_id=0)
 
     async def _send_voice_levels(self, levels: list[float]) -> None:
