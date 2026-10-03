@@ -93,6 +93,18 @@ class Agent:
             lines += CANNOT_LOOK
         return lines + "".join(h + "\n" for h in self.tools.hints)
 
+    def missed(self, request: str, names: list[str], results: list[ToolResult]) -> tuple[str, str] | None:
+        """(why, detail) when the tools came back without what was asked and
+        vision could still answer, else None."""
+        if not self.tools.has("look") or any(r.speak for r in results):
+            return None
+        for name, result in zip(names, results):
+            if name == "query_state" and not mentions_tracked(request, result.content):
+                return "Nothing tracked matches", f"tracked: {sorted(result.content.get('counts', {})) or 'nothing'}"
+            if name == "read_text" and result.content.get("note", "").startswith(("no text mentions", "no readable")):
+                return "No matching text", result.content["note"]
+        return None
+
     async def handle(self, request: str) -> Answer:
         t0 = time.perf_counter()
         messages: list[dict[str, Any]] = [
@@ -122,21 +134,20 @@ class Agent:
             results.append(result)
             messages.append({"role": "tool", "tool_call_id": call.id, "content": result.json()})
         names = [c.name for c in reply.tool_calls]
-        if "query_state" in names and self.tools.has("look") and not any(r.speak for r in results):
-            tracked = results[names.index("query_state")].content
-            if not mentions_tracked(request, tracked):
-                # Asked about something the detector doesn't track (ammo, a
-                # door's colour...): let vision answer instead of "can't see".
-                steps.append(Step(kind="tool", title="Nothing tracked matches: look instead",
-                                  detail=f"tracked: {sorted(tracked.get('counts', {})) or 'nothing'}"))
-                t = time.perf_counter()
-                args = {"question": request, "seconds": 0}
-                look = await self.tools.run("look", args)
-                steps.append(self.tools.step("look", args, look, (time.perf_counter() - t) * 1000))
-                if look.speak:
-                    latency["tools"] = (time.perf_counter() - t1) * 1000
-                    steps.append(Step(kind="llm", title="Answer taken from the tool", detail="no second Qwen call needed"))
-                    return Answer(look.speak, look.refs, names + ["look"], latency, steps=steps)
+        miss = self.missed(request, names, results)
+        if miss:
+            # Asked about something the detector doesn't track or the text
+            # reader can't find (an ammo icon, a door's colour...): let vision
+            # answer instead of "can't see".
+            steps.append(Step(kind="tool", title=f"{miss[0]}: look instead", detail=miss[1]))
+            t = time.perf_counter()
+            args = {"question": request, "seconds": 0}
+            look = await self.tools.run("look", args)
+            steps.append(self.tools.step("look", args, look, (time.perf_counter() - t) * 1000))
+            if look.speak:
+                latency["tools"] = (time.perf_counter() - t1) * 1000
+                steps.append(Step(kind="llm", title="Answer taken from the tool", detail="no second Qwen call needed"))
+                return Answer(look.speak, look.refs, names + ["look"], latency, steps=steps)
         latency["tools"] = (time.perf_counter() - t1) * 1000
         refs = [ref for r in results for ref in r.refs]
         if all(r.speak for r in results):
