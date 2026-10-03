@@ -1,0 +1,137 @@
+// Brings the checkout up to date before the app starts: git pull, then
+// reinstall the app's npm packages or the Python package only when their
+// dependency files changed. Run by G-VISION.bat on every launch and by the
+// panel's Update button. Never blocks the launch: if anything fails (offline,
+// local changes, no git) it says why and the app starts with what is there.
+//
+//   node app/update.js
+'use strict';
+
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const { REPO_ROOT, loadConfig } = require('./services');
+
+const IS_WIN = process.platform === 'win32';
+const DEFAULT_EXTRAS = 'dev,perception,voice';
+
+function fileHash(file) {
+  try {
+    return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+function readState(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+// `live` shows the command's own progress in the launcher window (installs).
+function defaultRun(cmd, args, cwd, { live = false } = {}) {
+  const r = spawnSync(cmd, args, {
+    cwd,
+    encoding: 'utf8',
+    shell: IS_WIN && cmd === 'npm',
+    windowsHide: true,
+    stdio: live ? 'inherit' : 'pipe',
+  });
+  return { ok: !r.error && r.status === 0, out: `${r.stdout || ''}${r.stderr || ''}`.trim(), error: r.error };
+}
+
+// Returns { pulled, updated, installed: [...], messages: [...] }.
+function runUpdate({ repoRoot = REPO_ROOT, run = defaultRun, log = console.log, python = null, extras = DEFAULT_EXTRAS } = {}) {
+  const result = { pulled: false, updated: false, installed: [], messages: [] };
+  const say = (m) => {
+    result.messages.push(m);
+    log(m);
+  };
+
+  const head = () => {
+    const r = run('git', ['rev-parse', 'HEAD'], repoRoot);
+    return r.ok ? r.out : null;
+  };
+  const before = head();
+  if (!before) {
+    say('Update skipped: git is not available or this is not a git checkout.');
+  } else {
+    say('Checking for updates...');
+    const pull = run('git', ['pull', '--ff-only'], repoRoot);
+    if (!pull.ok) {
+      say(`Update skipped, starting the current version. git said: ${pull.out.split('\n').slice(-3).join(' ')}`);
+    } else {
+      result.pulled = true;
+      const after = head();
+      result.updated = after !== before;
+      say(result.updated ? `Updated ${before.slice(0, 7)} -> ${after.slice(0, 7)}.` : 'Already up to date.');
+    }
+  }
+
+  // Reinstall only what changed since the last successful install.
+  const stateFile = path.join(repoRoot, 'logs', 'install-state.json');
+  const state = readState(stateFile);
+  const deps = [
+    {
+      key: 'npm',
+      file: path.join(repoRoot, 'app', 'package-lock.json'),
+      label: "the app's packages",
+      install: () => run('npm', ['install', '--no-audit', '--no-fund'], path.join(repoRoot, 'app'), { live: true }),
+    },
+    {
+      key: 'python',
+      file: path.join(repoRoot, 'python', 'pyproject.toml'),
+      label: 'the Python package',
+      install: () => (python
+        ? run(python, ['-m', 'pip', 'install', '-e', `.[${extras}]`], path.join(repoRoot, 'python'), { live: true })
+        : { ok: false, out: 'no Python environment found' }),
+    },
+  ];
+  for (const dep of deps) {
+    const hash = fileHash(dep.file);
+    if (!hash || state[dep.key] === hash) continue;
+    if (state[dep.key] === undefined && dep.key === 'npm' && !result.updated) {
+      // First run of the updater: node_modules came from the launcher's own
+      // npm install. The Python package is installed once anyway, since
+      // extras added since the last manual install may be missing.
+      state[dep.key] = hash;
+      continue;
+    }
+    say(`Installing ${dep.label} (dependencies changed)...`);
+    const r = dep.install();
+    if (r.ok) {
+      state[dep.key] = hash;
+      result.installed.push(dep.key);
+    } else {
+      const why = r.out || (r.error ? r.error.message : 'see the output above');
+      say(`Could not install ${dep.label} (will retry next launch): ${why.split('\n').slice(-3).join(' ')}`);
+    }
+  }
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  return result;
+}
+
+if (require.main === module) {
+  let python = null;
+  try {
+    const cfg = loadConfig();
+    if (!cfg.python.notFound) python = cfg.python.exe;
+  } catch (err) {
+    console.log(`Ignoring gvision.config.json for the update: ${err.message}`);
+  }
+  try {
+    const r = runUpdate({ python });
+    // Exit code 2 tells the launcher to leave the window open a moment so a
+    // failed install can be read.
+    if (r.messages.some((m) => m.startsWith('Could not install'))) process.exitCode = 2;
+  } catch (err) {
+    console.log(`Update failed, starting anyway: ${err.message}`);
+  }
+}
+
+module.exports = { fileHash, runUpdate };

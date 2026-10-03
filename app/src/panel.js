@@ -116,6 +116,11 @@ window.gvision.getConnection().then(setConnection);
 window.gvision.onServices(renderServices);
 window.gvision.getServices().then(renderServices);
 document.getElementById('open-logs').addEventListener('click', () => window.gvision.openLogs());
+document.getElementById('update').addEventListener('click', (e) => {
+  e.target.disabled = true;
+  e.target.textContent = 'Updating...';
+  window.gvision.update();
+});
 
 window.gvision.onMessage((m) => {
   counts.set(m.type, (counts.get(m.type) || 0) + 1);
