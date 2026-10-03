@@ -21,6 +21,7 @@ from gvision.protocol import (
     ClearMsg,
     ConfigChangedMsg,
     DimMsg,
+    ExchangeMsg,
     FocusMsg,
     HighlightMsg,
     Message,
@@ -92,8 +93,11 @@ async def _stream_status(bridge: Bridge, stop: asyncio.Event) -> None:
 # A sign on screen that the text watcher would have found (plan 7.1).
 _SIGN = Box(x=0.72, y=0.08, w=0.2, h=0.07)
 
+# (question, tool the agent would call, glow color, spoken segments)
 _ANSWERS = [
     (
+        "what's dangerous around me?",
+        "set_watch",
         "danger",
         [
             Segment(id=0, text="There's an explosive barrel on your left,", refs=["obj:22"]),
@@ -102,6 +106,8 @@ _ANSWERS = [
         ],
     ),
     (
+        "what does that sign say?",
+        "read_text",
         "info",
         [
             Segment(id=0, text="The sign at the top right says:", refs=["text:7"]),
@@ -126,8 +132,12 @@ async def _play_answers(bridge: Bridge, stop: asyncio.Event, settings: DemoSetti
             return
         if not bridge.connected:
             continue
-        color_role, script = _ANSWERS[(n - 1) % len(_ANSWERS)]
+        question, tool, color_role, script = _ANSWERS[(n - 1) % len(_ANSWERS)]
         answer_id = f"demo-{n}"
+        bridge.send(ExchangeMsg(
+            exchange_id=f"demo-{time.time():.3f}", asked_ts=time.time() - 1.2, question=question, via="typed",
+            answer=" ".join(seg.text for seg in script), tools=[tool], latency_ms={"llm_tool_call": 0.0},
+        ))
         bridge.send(AnswerMsg(answer_id=answer_id, segments=script))
         for ref in dict.fromkeys(ref for seg in script for ref in seg.refs):
             box = _SIGN if ref.startswith("text:") else None

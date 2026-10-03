@@ -10,6 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { EventEmitter } = require('node:events');
+const { resolveSettings, settingsArgs } = require('./settings');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const CONFIG_FILE = path.join(REPO_ROOT, 'gvision.config.json');
@@ -88,6 +89,7 @@ function resolveConfig({ fileConfig = {}, mode = null, configDir = REPO_ROOT, en
       mmproj: cfg.llama.mmproj ? expandPath(cfg.llama.mmproj, llamaDir) : null,
     },
     python: { ...cfg.python, dir: pythonDir, ...resolvePython(cfg.python.exe, pythonDir, env) },
+    settings: resolveSettings(fileConfig.settings),
   };
 }
 
@@ -115,8 +117,11 @@ function llamaCommand(llama) {
   return { name: 'qwen', label: 'Qwen (llama-server)', exe: llama.server, args, cwd: llama.dir };
 }
 
-function pythonCommand(py, llamaPort) {
-  const args = ['-m', 'gvision', ...py.args, '--port', String(py.port)];
+// The Settings tab's choices become flags for the voice agent.
+function pythonCommand(py, llamaPort, settings = null) {
+  const args = ['-m', 'gvision', ...py.args];
+  if (settings && py.args.includes('--agent')) args.push(...settingsArgs(settings, py.args));
+  args.push('--port', String(py.port));
   if (py.args.includes('--agent') && !py.args.includes('--qwen-url')) {
     args.push('--qwen-url', `http://127.0.0.1:${llamaPort}`);
   }
@@ -367,7 +372,7 @@ class Service extends EventEmitter {
 function serviceCommands(cfg) {
   return {
     qwen: llamaCommand(cfg.llama),
-    backend: pythonCommand(cfg.python, cfg.llama.port),
+    backend: pythonCommand(cfg.python, cfg.llama.port, cfg.settings),
   };
 }
 
@@ -390,7 +395,7 @@ function createServices(cfg, { logDir = path.join(REPO_ROOT, 'logs') } = {}) {
     const port = cfg.python.port;
     services.push(
       new Service({
-        ...pythonCommand(cfg.python, cfg.llama.port),
+        ...pythonCommand(cfg.python, cfg.llama.port, cfg.settings),
         env: { PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
         isReady: () => portOpen(port),
         port,

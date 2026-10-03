@@ -1,55 +1,147 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data:" />
     <title>G-VISION</title>
-    <style>
-      :root { color-scheme: light dark; font-family: 'Segoe UI', system-ui, sans-serif; }
-      body { margin: 0; padding: 20px 24px; background: Canvas; color: CanvasText; }
-      h1 { font-size: 18px; margin: 0 0 16px; }
-      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; margin: 20px 0 8px; }
-      .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; background: #8884; }
-      .pill.ok { background: #2e9e5b; color: #fff; }
-      .pill.listening { background: #d9534f; color: #fff; }
-      .pill.thinking, .pill.speaking { background: #ffc83d; color: #000; }
-      .pill.ready { background: #2e9e5b; color: #fff; }
-      .pill.starting, .pill.stopping { background: #ffc83d; color: #000; }
-      .pill.failed { background: #d9534f; color: #fff; }
-      .detail { font-size: 12px; opacity: 0.75; max-width: 520px; overflow-wrap: anywhere; }
-      #heard { font-style: italic; }
-      table { border-collapse: collapse; font-size: 13px; }
-      td { padding: 2px 16px 2px 0; }
-      .segment { padding: 2px 4px; border-radius: 4px; }
-      .segment.active { background: #ffc83d55; }
-      .row { display: flex; gap: 12px; align-items: center; }
-      code { font-size: 12px; }
-    </style>
+    <link rel="stylesheet" href="panel.css" />
   </head>
   <body>
-    <h1>G-VISION <span id="conn" class="pill">disconnected</span></h1>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></symbol>
+      <symbol id="i-log" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></symbol>
+      <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+      <symbol id="i-eraser" viewBox="0 0 24 24"><path d="m7 21-4-4L14 6l6 6-9 9z"/><path d="M7 21h14"/></symbol>
+      <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 0-5-5L14 6z"/><path d="M3 21l6-6"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    </svg>
 
-    <h2>Startup</h2>
-    <table id="services"><tr><td>Not managed by the app</td></tr></table>
-    <p class="row"><button id="update">Update and restart</button> <button id="open-logs">Open logs</button></p>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="logo" aria-hidden="true"><span></span></div>
+          <div>
+            <div class="brand-name">G-VISION</div>
+            <div class="brand-sub">Game vision assistant</div>
+          </div>
+        </div>
 
-    <h2>Dashboard</h2>
-    <table id="status"><tr><td>No status yet</td></tr></table>
+        <nav class="nav" role="tablist">
+          <button class="nav-item active" data-tab="home" role="tab"><svg><use href="#i-home"/></svg>Home</button>
+          <button class="nav-item" data-tab="log" role="tab"><svg><use href="#i-log"/></svg>Log<span id="log-count" class="nav-count" hidden></span></button>
+          <button class="nav-item" data-tab="settings" role="tab"><svg><use href="#i-settings"/></svg>Settings<span id="settings-dot" class="nav-dot" hidden></span></button>
+        </nav>
 
-    <h2>Voice</h2>
-    <p><span id="voice-state" class="pill">idle</span> <span id="heard"></span></p>
+        <div class="sidebar-foot">
+          <div id="conn" class="conn"><span class="dot"></span><span class="conn-text">Disconnected</span></div>
+          <div id="mini-services" class="mini-services"></div>
+          <button id="update" class="btn btn-ghost btn-block"><svg><use href="#i-download"/></svg>Update and restart</button>
+        </div>
+      </aside>
 
-    <h2>Answer</h2>
-    <p id="answer">No answer yet</p>
+      <main class="main">
+        <!-- Home -->
+        <section class="page active" data-page="home">
+          <header class="page-head">
+            <div>
+              <h1>Home</h1>
+              <p class="sub">What G-VISION is doing right now.</p>
+            </div>
+            <div class="head-actions">
+              <button id="clear" class="btn"><svg><use href="#i-eraser"/></svg>Clear highlights</button>
+            </div>
+          </header>
 
-    <h2>Controls</h2>
-    <div class="row">
-      <button id="clear">Clear highlights</button>
-      <label>Dim strength <input id="dim" type="range" min="0" max="0.9" step="0.05" value="0.6" /> <span id="dim-value">60%</span></label>
+          <div class="grid">
+            <article class="card now" id="now">
+              <div class="orb-wrap"><div id="orb" class="orb idle"><span></span><span></span><span></span></div></div>
+              <div class="now-body">
+                <div id="voice-state" class="eyebrow">Ready</div>
+                <div id="heard" class="heard">Hold <kbd id="ptt-hint">Alt + 3</kbd> and ask about what's on screen.</div>
+                <div id="answer" class="answer"></div>
+              </div>
+            </article>
+
+            <article class="card services-card">
+              <div class="card-head">
+                <h2>Services</h2>
+                <button id="open-logs" class="btn btn-small btn-ghost"><svg><use href="#i-folder"/></svg>Open logs</button>
+              </div>
+              <div id="services" class="services"></div>
+            </article>
+
+            <article class="card perf-card">
+              <div class="card-head"><h2>Performance</h2></div>
+              <div id="metrics" class="metrics"></div>
+              <div id="components" class="components"></div>
+            </article>
+
+            <article class="card recent-card">
+              <div class="card-head">
+                <h2>Recent questions</h2>
+                <button class="btn btn-small btn-ghost" data-goto="log">Open log<svg><use href="#i-arrow"/></svg></button>
+              </div>
+              <div id="recent" class="recent"></div>
+            </article>
+          </div>
+
+          <details class="diagnostics">
+            <summary>Diagnostics</summary>
+            <div id="counts" class="counts"></div>
+          </details>
+        </section>
+
+        <!-- Log -->
+        <section class="page" data-page="log">
+          <header class="page-head">
+            <div>
+              <h1>Log</h1>
+              <p class="sub">Every question, what was on screen and what G-VISION answered.</p>
+            </div>
+            <div class="head-actions">
+              <label class="search"><svg><use href="#i-search"/></svg><input id="log-search" type="search" placeholder="Search questions and answers" /></label>
+              <button id="clear-log" class="btn btn-ghost btn-danger"><svg><use href="#i-trash"/></svg>Clear</button>
+            </div>
+          </header>
+          <div id="feed" class="feed"></div>
+        </section>
+
+        <!-- Settings -->
+        <section class="page" data-page="settings">
+          <header class="page-head">
+            <div>
+              <h1>Settings</h1>
+              <p class="sub" id="settings-file">Saved to gvision.config.json.</p>
+            </div>
+          </header>
+          <div id="restart-banner" class="banner" hidden>
+            <div><strong>Restart the backend to apply.</strong> <span>Voice and vision settings load when it starts.</span></div>
+            <button id="restart-backend" class="btn btn-primary"><svg><use href="#i-refresh"/></svg>Restart backend</button>
+          </div>
+          <div id="settings-error" class="banner banner-bad" hidden></div>
+          <div id="settings-form" class="settings"></div>
+        </section>
+      </main>
     </div>
 
-    <h2>Messages received</h2>
-    <table id="counts"></table>
+    <div id="lightbox" class="lightbox" hidden>
+      <figure>
+        <img id="lightbox-img" alt="Screen when the question was asked" />
+        <figcaption id="lightbox-cap"></figcaption>
+      </figure>
+      <button class="lightbox-close btn btn-ghost" aria-label="Close"><svg><use href="#i-x"/></svg></button>
+    </div>
+
+    <div id="toast" class="toast" hidden></div>
 
     <script src="panel.js"></script>
   </body>

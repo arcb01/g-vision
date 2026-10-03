@@ -1,6 +1,8 @@
 // Electron main process: starts llama-server and the Python backend (see
 // services.js), owns the WebSocket connection to the Python bridge and
 // forwards validated messages to the overlay and control panel windows.
+// Answered questions are kept in the conversation log (conversation.js) and
+// the panel's Settings tab edits gvision.config.json (settings.js).
 //
 //   npm start                    Qwen + live perception + voice agent
 //   npm start -- --demo          synthetic demo, no Qwen
@@ -10,14 +12,17 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, shell } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, screen, shell } = require('electron');
 const { parseMessage, validateMessage, makeMessage } = require('./protocol');
 const { CONFIG_FILE, REPO_ROOT, createServices, loadConfig, serviceCommands } = require('./services');
+const { ConversationLog } = require('./conversation');
+const { SPEC, readFile, resolveSettings, saveSettings } = require('./settings');
 
 const argv = process.argv.slice(1);
 const MODE = argv.includes('--demo') ? 'demo' : null;
 const MANAGE_SERVICES = !argv.includes('--no-services') && !process.env.GVISION_NO_SERVICES;
 const LOG_DIR = path.join(REPO_ROOT, 'logs');
+const conversation = new ConversationLog(path.join(LOG_DIR, 'conversation'));
 
 let config = null;
 let configError = null;
@@ -37,6 +42,19 @@ let socket = null;
 let connected = false;
 let services = [];
 let quitting = false;
+
+// Settings as saved now; a bad file reads as the defaults.
+function currentSettings() {
+  try {
+    return resolveSettings(readFile(CONFIG_FILE).settings);
+  } catch {
+    return resolveSettings();
+  }
+}
+
+function toPanel(channel, payload) {
+  if (panel && !panel.isDestroyed()) panel.webContents.send(channel, payload);
+}
 
 function broadcast(channel, payload) {
   for (const win of [overlay, panel]) {
@@ -60,10 +78,19 @@ function connectBridge() {
   socket.addEventListener('open', () => {
     connected = true;
     broadcast('gvision:connection', { connected, url: BRIDGE_URL });
+    // The backend starts with its default dim strength; send the saved one.
+    sendToBridge(makeMessage('config_changed', { changes: { 'visual_effects.dim_strength': currentSettings().dimStrength } }));
   });
   socket.addEventListener('message', (event) => {
     const result = parseMessage(String(event.data));
-    if (result.ok) {
+    if (result.ok && result.msg.type === 'exchange') {
+      // Screenshots are big and the overlay has no use for them.
+      try {
+        toPanel('gvision:exchange', conversation.add(result.msg));
+      } catch (err) {
+        console.error('[conversation]', err);
+      }
+    } else if (result.ok) {
       broadcast('gvision:message', result.msg);
     } else {
       console.warn('[bridge] invalid message:', result.errors);
@@ -100,10 +127,15 @@ function createOverlay() {
 }
 
 function createPanel() {
+  nativeTheme.themeSource = 'dark';
   panel = new BrowserWindow({
-    width: 960,
-    height: 680,
+    width: 1180,
+    height: 800,
+    minWidth: 820,
+    minHeight: 560,
     title: 'G-VISION',
+    backgroundColor: '#0b0d12',
+    autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
   });
   panel.loadFile(path.join(__dirname, 'src', 'panel.html'));
@@ -183,6 +215,30 @@ app.whenReady().then(() => {
   ipcMain.handle('gvision:restart-service', (_event, name) => serviceAction(name, 'restart'));
   ipcMain.handle('gvision:stop-service', (_event, name) => serviceAction(name, 'stop'));
   ipcMain.handle('gvision:update', () => updateAndRestart());
+  ipcMain.handle('gvision:get-log', () => conversation.list());
+  ipcMain.handle('gvision:clear-log', () => conversation.clear());
+  ipcMain.handle('gvision:get-settings', () => {
+    let error = null;
+    try {
+      readFile(CONFIG_FILE);
+    } catch (err) {
+      error = `${CONFIG_FILE}: ${err.message}`;
+    }
+    return { spec: SPEC, values: currentSettings(), file: CONFIG_FILE, error };
+  });
+  // Saves to gvision.config.json; live settings reach the backend now, the
+  // rest on its next restart.
+  ipcMain.handle('gvision:save-settings', (_event, changes) => {
+    try {
+      const values = saveSettings(CONFIG_FILE, changes);
+      if ('dimStrength' in changes) {
+        sendToBridge(makeMessage('config_changed', { changes: { 'visual_effects.dim_strength': values.dimStrength } }));
+      }
+      return { ok: true, values };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
   ipcMain.handle('gvision:open-logs', () => {
     fs.mkdirSync(LOG_DIR, { recursive: true });
     return shell.openPath(LOG_DIR);

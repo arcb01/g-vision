@@ -166,6 +166,25 @@ class VoiceMsg(_Message):
     (speaking), sent ~20 times a second to drive the overlay's voice waves."""
 
 
+class ExchangeMsg(_Message):
+    """One question and its answer, for the panel's conversation log."""
+
+    type: Literal["exchange"] = "exchange"
+    exchange_id: str
+    asked_ts: float
+    """When the question was asked (push-to-talk released, or typed)."""
+    question: str
+    """What speech-to-text heard, or what was typed."""
+    answer: str
+    via: Literal["voice", "typed"] = "voice"
+    tools: list[str] = []
+    """Tools the agent called to answer, in order."""
+    latency_ms: dict[str, float] = {}
+    screenshot: str | None = None
+    """What was on screen when it was asked: a ``data:image/jpeg;base64,`` URL.
+    The overlay is excluded from capture, so this is the game alone."""
+
+
 # --- Either direction ------------------------------------------------------
 
 
@@ -198,6 +217,7 @@ Message = Annotated[
         BadgesMsg,
         StatusMsg,
         VoiceMsg,
+        ExchangeMsg,
         ClearMsg,
         ConfigChangedMsg,
     ],
