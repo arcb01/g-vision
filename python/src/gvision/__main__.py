@@ -126,7 +126,7 @@ def main() -> None:
     agent = parser.add_argument_group("agent (with --live)")
     agent.add_argument("--agent", action="store_true", help="push-to-talk questions answered by Qwen with glow + voice")
     agent.add_argument("--qwen-url", default="http://127.0.0.1:8080", help="llama-server running Qwen3.5-2B")
-    agent.add_argument("--ptt-key", default="f8", help="push-to-talk key: f8, caps_lock, a letter...")
+    agent.add_argument("--ptt-key", default="alt+3", help="push-to-talk hotkey: alt+3, f8, ctrl+shift+space...")
     agent.add_argument("--asr", choices=["whisper", "nemotron"], default="whisper", help="speech-to-text model")
     agent.add_argument("--whisper-model", default="medium", help="faster-whisper size: small, medium...")
     agent.add_argument("--asr-device", default="cuda", help="device for speech-to-text")
