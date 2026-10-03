@@ -7,7 +7,9 @@
     "port": 8080
   },
   "python": {
-    "exe": ".venv/Scripts/python.exe",
-    "args": ["--live", "--agent"]
+    "args": [
+      "--live",
+      "--agent"
+    ]
   }
 }

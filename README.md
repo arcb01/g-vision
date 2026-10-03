@@ -96,9 +96,10 @@ leaves it running on exit.
 Paths come from `gvision.config.json` at the repository root. Without one, the
 defaults expect the llama.cpp folder at `~/Desktop/coding projects/G-vision-lab`
 (with `llama/llama-server.exe` and `models/Qwen3.5-2B-Q4_K_M.gguf` plus
-`models/mmproj-F16.gguf`) and the Python virtual environment at
-`python/.venv`. To change them, copy `gvision.config.example.json` to
-`gvision.config.json` and edit it; `python.args` sets the backend's options,
+`models/mmproj-F16.gguf`) and use the first Python virtual environment found
+among the active one (`$VIRTUAL_ENV`), `python/.venv` and `.venv` at the
+repository root. To change them, copy `gvision.config.example.json` to
+`gvision.config.json` and edit it; `python.exe` points at a specific Python (relative to `python/`), `python.args` sets the backend's options,
 e.g. `["--live", "--agent", "--prompts", "person,cow", "--whisper-model", "small"]`.
 
 Other ways to start: `G-VISION.bat --demo` (or `npm start -- --demo`) runs the

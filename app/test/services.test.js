@@ -65,3 +65,37 @@ test('a missing executable or a crash is reported as failed', async () => {
   assert.strictEqual(crash.state, 'failed');
   assert.match(crash.detail, /exited \(3\): boom/);
 });
+
+test('the Python environment is found in python/.venv, the repo root or $VIRTUAL_ENV', () => {
+  const venvPython = process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python';
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gvision-root-'));
+  const pythonDir = path.join(root, 'python');
+  const make = (dir) => {
+    const exe = path.join(dir, venvPython);
+    fs.mkdirSync(path.dirname(exe), { recursive: true });
+    fs.writeFileSync(exe, '');
+    return exe;
+  };
+  const { pythonCandidates } = require('../services');
+  const candidates = pythonCandidates(pythonDir, { VIRTUAL_ENV: path.join(root, 'active') });
+  assert.deepStrictEqual(candidates, [
+    path.join(root, 'active', venvPython),
+    path.join(pythonDir, '.venv', venvPython),
+    path.join(root, '.venv', venvPython),
+  ]);
+  const rootVenv = make(path.join(root, '.venv'));
+  assert.ok(candidates.filter((c) => fs.existsSync(c)).includes(rootVenv));
+});
+
+test('a missing Python environment says where it looked', async () => {
+  const cfg = resolveConfig({ env: { VIRTUAL_ENV: '/no/such/venv' } });
+  // The repo itself may have a venv; only check the message when none exists.
+  if (cfg.python.notFound) {
+    assert.match(cfg.python.notFound, /\/no\/such\/venv/);
+    const svc = new Service({ ...pythonCommand(cfg.python, 8080), isReady: async () => false, readyTimeoutS: 1 });
+    await svc.start();
+    assert.match(svc.detail, /no Python environment found/);
+  } else {
+    assert.ok(fs.existsSync(cfg.python.exe));
+  }
+});
