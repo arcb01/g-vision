@@ -31,9 +31,9 @@ can't see it yet and that you're watching for it.
 CAN_READ = """\
 - For any question about text on screen (signs, quests, menus, messages), call read_text, \
 or recent_text for text that already went away. Quote the words that answer the question.
-- You can't look back in time yet; say so briefly if asked.
 """
-CANNOT_READ = "- You can't read text or look back in time yet; say so briefly if asked.\n"
+CANNOT_READ = "- You can't read text yet; say so briefly if asked.\n"
+CANNOT_LOOK = "- You can't look back in time yet; say so briefly if asked.\n"
 
 
 class Chat(Protocol):
@@ -73,11 +73,17 @@ class Agent:
         self.world = world
         self.tools = tools or ToolExecutor(world)
 
+    def abilities(self) -> str:
+        lines = CAN_READ if self.tools.text else CANNOT_READ
+        if not self.tools.has("look"):
+            lines += CANNOT_LOOK
+        return lines + "".join(h + "\n" for h in self.tools.hints)
+
     async def handle(self, request: str) -> Answer:
         t0 = time.perf_counter()
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT.format(
-                abilities=CAN_READ if self.tools.text else CANNOT_READ, state=json.dumps(self.world.snapshot()))},
+                abilities=self.abilities(), state=json.dumps(self.world.snapshot()))},
             {"role": "user", "content": request},
         ]
         reply = await self.qwen.chat(messages, tools=self.tools.specs)
@@ -94,10 +100,13 @@ class Agent:
             results.append(result)
             messages.append({"role": "tool", "tool_call_id": call.id, "content": result.json()})
         latency["tools"] = (time.perf_counter() - t1) * 1000
+        refs = [ref for r in results for ref in r.refs]
+        if all(r.speak for r in results):
+            return Answer(" ".join(r.speak for r in results), refs, [c.name for c in reply.tool_calls], latency)
 
         t2 = time.perf_counter()
         final = await self.qwen.chat(messages, max_tokens=60)
         latency["llm_answer"] = (time.perf_counter() - t2) * 1000
         text = final.content or fallback_text(results)
-        refs = [ref for r in results for ref in r.refs] + self.tools.highlight_text(text, results)
+        refs += self.tools.highlight_text(text, results)
         return Answer(text, refs, [c.name for c in reply.tool_calls], latency)

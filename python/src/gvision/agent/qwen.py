@@ -42,6 +42,7 @@ class QwenClient:
 
     async def chat(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, max_tokens: int = 200,
+        response_format: dict[str, Any] | None = None,
     ) -> Reply:
         body: dict[str, Any] = {
             "messages": messages,
@@ -53,6 +54,8 @@ class QwenClient:
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
+        if response_format:
+            body["response_format"] = response_format
         r = await self._http.post(f"{self.url}/v1/chat/completions", json=body)
         r.raise_for_status()
         msg = r.json()["choices"][0]["message"]

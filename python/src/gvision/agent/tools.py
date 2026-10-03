@@ -3,15 +3,17 @@
 The descriptions carry routing hints: on Arnau's PC they lifted Qwen3.5-2B
 from 14/20 to 17/20 correct tool calls, and its typical mistake was sending
 "where is X?" to ``query_state`` instead of ``set_watch``. Keep the list
-short; tools from the plan that are not built yet (look, learn_label) are
-left out so the model can't pick them, and the text tools are only offered
-when the text watcher runs.
+short; tools from the plan that are not built yet (learn_label) are left out
+so the model can't pick them, the text tools are only offered when the text
+watcher runs, and optional features add theirs with ``ToolExecutor.register``
+(scene memory adds ``look``).
 """
 
 from __future__ import annotations
 
 import json
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -129,6 +131,8 @@ class ToolResult:
     """Elements the answer is about, for the spotlight."""
     text_refs: list[str] = field(default_factory=list)
     """Text blocks the answer may be about; highlighted once the answer says which."""
+    speak: str | None = None
+    """A finished spoken answer (e.g. from Qwen's vision); spares the agent's second call."""
 
     def json(self) -> str:
         return json.dumps(self.content)
@@ -141,10 +145,25 @@ class ToolExecutor:
         self.world = world
         self.find_timeout = find_timeout
         self.text = text
+        self._extra_specs: list[dict[str, Any]] = []
+        self.hints: list[str] = []
+        """System prompt lines for registered tools."""
+        self._extra: dict[str, Callable[..., Awaitable[ToolResult]]] = {}
 
     @property
     def specs(self) -> list[dict[str, Any]]:
-        return TOOLS + TEXT_TOOLS if self.text else TOOLS
+        """What Qwen is offered: the built-in tools, text tools and registered ones."""
+        base = TOOLS + TEXT_TOOLS if self.text else TOOLS
+        return base + self._extra_specs if self._extra_specs else base
+
+    def register(self, schema: dict[str, Any], handler: Callable[..., Awaitable[ToolResult]], hint: str = "") -> None:
+        self._extra_specs.append(schema)
+        self._extra[schema["function"]["name"]] = handler
+        if hint:
+            self.hints.append(hint)
+
+    def has(self, name: str) -> bool:
+        return name in self._extra
 
     async def run(self, name: str, args: dict[str, Any]) -> ToolResult:
         try:
@@ -158,6 +177,8 @@ class ToolExecutor:
                 return await self.read_text(**args)
             if name == "recent_text" and self.text:
                 return await self.recent_text(**args)
+            if name in self._extra:
+                return await self._extra[name](**args)
         except TypeError as e:  # wrong or missing arguments
             return ToolResult({"error": f"bad arguments for {name}: {e}"})
         return ToolResult({"error": f"unknown tool {name}"})

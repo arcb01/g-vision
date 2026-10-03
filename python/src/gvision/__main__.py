@@ -3,7 +3,8 @@
     python -m gvision --demo                    synthetic objects and answers
     python -m gvision --live --watch person     capture + YOLOE + ByteTrack
     python -m gvision --live --agent            + push-to-talk, Qwen, Kokoro: "find X",
-                                                and reading on-screen text (RapidOCR)
+                                                  reading on-screen text (RapidOCR) and
+                                                  scene memory ("what just hit me?")
     python -m gvision --check-exclusion         is the overlay kept out of capture?
 """
 
@@ -66,7 +67,7 @@ async def _live(args: argparse.Namespace, bridge: Bridge, stop: asyncio.Event) -
         show_all=args.show_all or not args.agent,
     )
     log.info("live: detecting %s at %.0f Hz, glowing %s", prompts, args.rate, watch or "nothing")
-    world = None
+    world = memory = None
     jobs = []
     if args.agent:
         from gvision.world import WorldState
@@ -75,8 +76,17 @@ async def _live(args: argparse.Namespace, bridge: Bridge, stop: asyncio.Event) -
         text = await _text_watcher(args, bridge, source)
         if text:
             jobs.append(text.run(stop))
-        jobs.append(_agent(args, bridge, world, stop, text))
+        if not args.no_memory:
+            from gvision.memory import EventLog, FrameHistory
+
+            history = FrameHistory(args.history_seconds)
+            events = EventLog(world)
+            history.listeners.append(lambda f: events.update(f.ts))
+            memory = (history, events)
+        jobs.append(_agent(args, bridge, world, stop, text, memory))
     pipeline = LivePipeline(bridge, source, detector, settings, world=world)
+    if memory:
+        pipeline.frame_listeners.append(memory[0].offer)
     await asyncio.gather(pipeline.run(stop), *jobs)
 
 
@@ -96,13 +106,25 @@ async def _text_watcher(args: argparse.Namespace, bridge: Bridge, source):
     return TextWatcher(bridge, source, engine, profiles_dir=args.text_profiles)
 
 
-async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.Event, text=None) -> None:
+async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.Event, text=None, memory=None) -> None:
     from gvision.agent.agent import Agent
     from gvision.agent.qwen import QwenClient
     from gvision.agent.tools import ToolExecutor
     from gvision.assistant import Assistant
 
     qwen = QwenClient(args.qwen_url)
+    tools = ToolExecutor(world, text=text)
+    narrator = None
+    if memory:
+        from gvision.memory import SITUATION_HINT, LookTool, Narrator, SharedQwen
+        from gvision.memory.look import HINT, SCHEMA
+
+        history, events = memory
+        qwen = SharedQwen(qwen)
+        tools.register(SCHEMA, LookTool(qwen, history, events), HINT)
+        if args.narrate_every > 0:
+            tools.hints.append(SITUATION_HINT)
+            narrator = asyncio.create_task(Narrator(qwen, history, events, world, args.narrate_every).run(stop))
     if not await qwen.health():
         log.warning("no llama-server at %s yet; start it (see README) and requests will work", args.qwen_url)
     tts = asr = recorder = None
@@ -116,18 +138,22 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
 
         asr = await asyncio.to_thread(load_asr, args.asr, args.asr_device, args.whisper_model)
         recorder = Recorder()
-    assistant = Assistant(bridge, world, Agent(qwen, world, ToolExecutor(world, text=text)), asr=asr, tts=tts, recorder=recorder)
-    if args.no_mic:
-        await assistant.read_stdin(stop)
-        return
-    from gvision.audio.ptt import PushToTalk
-
-    ptt = PushToTalk(args.ptt_key, assistant.ptt_down, assistant.ptt_up)
-    ptt.start(asyncio.get_running_loop())
+    assistant = Assistant(bridge, world, Agent(qwen, world, tools), asr=asr, tts=tts, recorder=recorder)
     try:
-        await stop.wait()
+        if args.no_mic:
+            await assistant.read_stdin(stop)
+            return
+        from gvision.audio.ptt import PushToTalk
+
+        ptt = PushToTalk(args.ptt_key, assistant.ptt_down, assistant.ptt_up)
+        ptt.start(asyncio.get_running_loop())
+        try:
+            await stop.wait()
+        finally:
+            ptt.stop()
     finally:
-        ptt.stop()
+        if narrator:
+            narrator.cancel()
         await qwen.close()
 
 
@@ -164,6 +190,10 @@ def main() -> None:
     agent.add_argument("--text-profiles", default="data/profiles", help="where learned text zones are saved per game")
     agent.add_argument("--ocr-side", type=int, default=1280, help="text detection resolution (long side, px)")
     agent.add_argument("--ocr-threads", type=int, default=4, help="CPU threads for RapidOCR")
+    agent.add_argument("--no-memory", action="store_true", help="no frame history, look tool or narrator")
+    agent.add_argument("--history-seconds", type=float, default=60.0, help="how much of the screen to remember")
+    agent.add_argument("--narrate-every", type=float, default=25.0,
+                       help="seconds between situation summaries by Qwen (0: off)")
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()

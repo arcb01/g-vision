@@ -69,7 +69,7 @@ def test_find_x_end_to_end_with_fake_qwen():
     assert answer.tool_calls == ["set_watch"]
     assert list(world.watches) == ["cow"]
     # The first call offers the tools and a snapshot; the answer call gets the tool result.
-    assert qwen.calls[0]["tools"] is TOOLS
+    assert qwen.calls[0]["tools"] == TOOLS
     assert '"watching": []' in qwen.calls[0]["messages"][0]["content"]
     tool_msg = qwen.calls[1]["messages"][-1]
     assert tool_msg["role"] == "tool" and json.loads(tool_msg["content"])["found"][0]["where"] == ["on the left"]
