@@ -38,6 +38,8 @@ log = logging.getLogger(__name__)
 MIN_CLIP_S = 0.3
 LEVEL_HZ = 20
 """How often voice loudness goes to the overlay's wave animation."""
+CHARS_PER_S = 15.0
+"""Speaking rate assumed when there is no voice (--no-tts), for text cues."""
 
 
 class Assistant:
@@ -135,17 +137,35 @@ class Assistant:
         audio = None
         if self.tts:
             audio = await asyncio.to_thread(self.tts.synthesize, answer.text)
+        text = self.agent.tools.text
+        if text and answer.text_cues:
+            text.show([ref for _, ref in answer.text_cues])
         self.bridge.send(SegmentStartedMsg(answer_id=answer_id, segment_id=0))
         self.bridge.send(VoiceMsg(state="speaking"))
-        if audio is not None:
-            samples, rate = audio
-            levels = asyncio.create_task(self._send_voice_levels(envelope(samples, rate, LEVEL_HZ)))
-            try:
-                await asyncio.to_thread(self.tts.play, samples, rate)
-            finally:
-                levels.cancel()
+        duration = len(audio[0]) / audio[1] if audio is not None else len(answer.text) / CHARS_PER_S
+        cues = asyncio.create_task(self._light_text(answer.text_cues, duration)) if text and answer.text_cues else None
+        try:
+            if audio is not None:
+                samples, rate = audio
+                levels = asyncio.create_task(self._send_voice_levels(envelope(samples, rate, LEVEL_HZ)))
+                try:
+                    await asyncio.to_thread(self.tts.play, samples, rate)
+                finally:
+                    levels.cancel()
+            elif cues:
+                await cues  # no voice: still walk through the text at reading pace
+        finally:
+            if cues:
+                cues.cancel()
         self.bridge.send(AnswerFinishedMsg(answer_id=answer_id))
         self.bridge.send(VoiceMsg(state="idle"))
+
+    async def _light_text(self, cues: list[tuple[float, str]], duration: float) -> None:
+        """Light each text block as the voice reaches the words that quote it."""
+        start = time.monotonic()
+        for at, ref in cues:
+            await asyncio.sleep(max(0.0, start + at * duration - time.monotonic()))
+            self.agent.tools.text.light(ref, segment_id=0)
 
     async def _send_voice_levels(self, levels: list[float]) -> None:
         start = time.monotonic()

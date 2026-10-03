@@ -12,6 +12,7 @@ watcher runs, and optional features add theirs with ``ToolExecutor.register``
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -248,23 +249,27 @@ class ToolExecutor:
             content["note"] = "no text seen in that time"
         return ToolResult(content, text_refs=[b.ref for b in blocks if b.gone is None])
 
-    def highlight_text(self, answer: str, results: list[ToolResult]) -> list[str]:
-        """Highlight the text blocks the answer talks about (by shared words)."""
+    def text_cues(self, answer: str, results: list[ToolResult]) -> list[tuple[float, str]]:
+        """The text blocks the answer quotes, each with where in the answer it
+        starts being read (0..1 of its length), so its glow can follow the voice."""
         candidates = [ref for r in results for ref in r.text_refs]
         if not self.text or not candidates:
             return []
+        lowered = answer.lower()
         said = text_words(answer)
-        picked = []
-        for ref in candidates:
+        cues: list[tuple[float, str]] = []
+        for ref in dict.fromkeys(candidates):
             block = self.text.blocks.get(ref)
             if not block:
                 continue
-            have = text_words(block.text)
-            if have and len(said & have) >= min(2, len(have)):
-                picked.append(ref)
-        if not picked and len(candidates) == 1:
-            picked = candidates
-        return self.text.highlight(picked[:3])
+            shared = said & text_words(block.text)
+            if shared and len(shared) >= min(2, len(text_words(block.text))):
+                hits = (re.search(rf"\b{re.escape(w)}", lowered) for w in shared)
+                start = min((m.start() for m in hits if m), default=0)
+                cues.append((start / max(len(answer), 1), ref))
+        if not cues and len(candidates) == 1 and candidates[0] in self.text.blocks:
+            cues = [(0.0, candidates[0])]
+        return sorted(cues)[:MAX_TEXT_BLOCKS]
 
 
 _STOP = {"the", "and", "what", "does", "say", "says", "said", "that", "this", "with", "for", "you", "your",

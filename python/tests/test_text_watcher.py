@@ -151,29 +151,46 @@ class FakeSource:
         pass
 
 
-def test_read_text_tool_answers_and_highlights_the_quoted_block():
+def test_read_text_glow_follows_the_voice(monkeypatch):
+    import gvision.assistant as assistant_module
+    from gvision.assistant import Assistant
+
+    monkeypatch.setattr(assistant_module, "CHARS_PER_S", 2000.0)  # no voice: walk the cues fast
     ocr = FakeOcr()
     bridge = FakeBridge()
-    image = scene(ocr, QUEST + [HP, (40, 300, 280, 24, "Press E to open")])
+    door = (40, 300, 280, 24, "Press E to open the door")
+    image = scene(ocr, QUEST + [HP, door])
     watcher = TextWatcher(bridge, FakeSource(image), ocr, profiles_dir=None)
     world = WorldState()
     tools = ToolExecutor(world, text=watcher)
-    qwen = FakeQwen(tool_reply("read_text", about="quest"), Reply("Your quest is to find the old lighthouse."))
-    answer = asyncio.run(Agent(qwen, world, tools).handle("what's my quest?"))
+    qwen = FakeQwen(tool_reply("read_text"),
+                    Reply("Your quest: find the old lighthouse. The sign says press E to open the door."))
+    answer = asyncio.run(Assistant(bridge, world, Agent(qwen, world, tools)).ask("what does it say?"))
 
     assert qwen.calls[0]["tools"] == TOOLS + TEXT_TOOLS
     assert "call read_text" in qwen.calls[0]["messages"][0]["content"]
-    result = json.loads(qwen.calls[1]["messages"][-1]["content"])
-    assert [b["text"] for b in result["text"]] == ["Quest: find the old lighthouse\nTalk to the blacksmith"]
-    quest_ref = result["text"][0]["ref"]
-    assert answer.refs == [quest_ref]
+    result = {b["text"]: b["ref"] for b in json.loads(qwen.calls[1]["messages"][-1]["content"])["text"]}
+    quest = result["Quest: find the old lighthouse\nTalk to the blacksmith"]
+    press = result["Press E to open the door"]
+    assert [ref for _, ref in answer.text_cues] == [quest, press]  # in the order they are spoken
+    assert answer.text_cues[0][0] < 0.3 < answer.text_cues[1][0]
     highlights = [m for m in bridge.sent if isinstance(m, HighlightMsg)]
-    assert [(h.ref, h.color_role) for h in highlights] == [(quest_ref, "info")]
-    assert highlights[0].box.x < 900 / W  # padded around the text
-    assert any(isinstance(m, FocusMsg) and m.refs == [quest_ref] for m in bridge.sent)
+    assert {(h.ref, h.color_role) for h in highlights} == {(quest, "info"), (press, "info")}  # not HP
+    assert all(h.box.w > 0 for h in highlights)
+    # Both are outlined unlit first, then each glows only while it is being read.
+    assert [m.refs for m in bridge.sent if isinstance(m, FocusMsg)] == [[], [quest], [press]]
     assert any(isinstance(m, DimMsg) and m.on for m in bridge.sent)
     for m in bridge.sent:
         assert parse(dump(m)) == m
+
+
+def test_single_text_result_is_lit_even_without_shared_words():
+    ocr = FakeOcr()
+    image = scene(ocr, [HP])
+    tools = ToolExecutor(WorldState(), text=TextWatcher(None, FakeSource(image), ocr, profiles_dir=None))
+    result = asyncio.run(tools.run("read_text", {}))
+    assert tools.text_cues("Your health is full.", [result]) == [(0.0, result.text_refs[0])]
+    assert tools.text_cues("Nothing.", []) == []
 
 
 def test_read_text_filters_by_place_and_falls_back_to_everything():

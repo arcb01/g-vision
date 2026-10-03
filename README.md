@@ -193,9 +193,11 @@ With `--agent`, a text watcher reads the screen in the background with
 RapidOCR (plan 7.1), so you can ask "what does that sign say?", "what's my
 quest?", "read the menu" or "what did that message say?". Qwen calls
 `read_text` (optionally with a word like "quest" or a place like "top right")
-or `recent_text` for text that has already gone, quotes the answer, and the
-text block it quotes gets a cyan contour with a light fill while the rest of
-the screen dims. Nothing is written on the overlay.
+or `recent_text` for text that has already gone, and quotes the answer. The
+screen dims and the text blocks it quotes get a faint outline; each one glows
+cyan with a light fill only while the voice is reading it, like karaoke, then
+goes back to faint when the voice moves on to the next. Nothing is written on
+the overlay.
 
 It runs on the CPU (4 threads, no GPU), about twice a second: only screen
 tiles that changed are searched for text, whole-screen detection happens at
