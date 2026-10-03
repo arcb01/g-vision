@@ -10,6 +10,20 @@ SAMPLE_RATE = 16_000
 """What both Whisper and Nemotron expect."""
 
 
+def loudness(samples: np.ndarray) -> float:
+    """RMS mapped to 0..1 so normal speech sits around the middle."""
+    if len(samples) == 0:
+        return 0.0
+    rms = float(np.sqrt(np.mean(np.square(samples, dtype=np.float64))))
+    return min(1.0, (rms / 0.15) ** 0.6)
+
+
+def envelope(samples: np.ndarray, sample_rate: int, hz: float) -> list[float]:
+    """Loudness every 1/hz seconds, to animate a voice while it plays."""
+    step = max(1, int(sample_rate / hz))
+    return [loudness(samples[i : i + step]) for i in range(0, len(samples), step)]
+
+
 class Recorder:
     def __init__(self, device: int | str | None = None) -> None:
         self.device = device
@@ -29,6 +43,12 @@ class Recorder:
     def _callback(self, indata, frames, time, status) -> None:  # noqa: ARG002
         with self._lock:
             self._chunks.append(indata[:, 0].copy())
+
+    def level(self) -> float:
+        """Loudness of the latest audio block, 0..1, for the voice waves."""
+        with self._lock:
+            last = self._chunks[-1] if self._chunks else None
+        return loudness(last) if last is not None else 0.0
 
     def stop(self) -> np.ndarray:
         """Stop and return the mono float32 clip at 16 kHz."""

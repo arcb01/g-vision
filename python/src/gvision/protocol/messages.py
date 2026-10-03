@@ -161,6 +161,9 @@ class VoiceMsg(_Message):
     state: Literal["listening", "thinking", "speaking", "idle"]
     transcript: str | None = None
     """What speech-to-text heard, once the key is released."""
+    level: Unit | None = None
+    """Loudness of the microphone (listening) or of the answer's voice
+    (speaking), sent ~20 times a second to drive the overlay's voice waves."""
 
 
 # --- Either direction ------------------------------------------------------

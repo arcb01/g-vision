@@ -19,15 +19,13 @@ import httpx
 
 from gvision.agent.agent import Agent, Answer
 from gvision.audio.asr import SpeechToText
-from gvision.audio.mic import SAMPLE_RATE, Recorder
+from gvision.audio.mic import SAMPLE_RATE, Recorder, envelope
 from gvision.audio.tts import KokoroTTS
 from gvision.bridge import Bridge
 from gvision.protocol import (
     AnswerFinishedMsg,
     AnswerMsg,
     ClearMsg,
-    DimMsg,
-    FocusMsg,
     Message,
     Segment,
     SegmentStartedMsg,
@@ -38,15 +36,14 @@ from gvision.world import WorldState
 log = logging.getLogger(__name__)
 
 MIN_CLIP_S = 0.3
-SPOTLIGHT_HOLD_S = 2.0
-"""Dimming stays this long after the answer is spoken (plan 6.1)."""
+LEVEL_HZ = 20
+"""How often voice loudness goes to the overlay's wave animation."""
 
 
 class Assistant:
     def __init__(
         self, bridge: Bridge, world: WorldState, agent: Agent,
         asr: SpeechToText | None = None, tts: KokoroTTS | None = None, recorder: Recorder | None = None,
-        dim_strength: float = DimMsg.model_fields["strength"].default, hold_s: float = SPOTLIGHT_HOLD_S,
     ) -> None:
         self.bridge = bridge
         self.world = world
@@ -54,9 +51,8 @@ class Assistant:
         self.asr = asr
         self.tts = tts
         self.recorder = recorder
-        self.dim_strength = dim_strength
-        self.hold_s = hold_s
         self._task: asyncio.Task | None = None
+        self._meter: asyncio.Task | None = None
         self._ids = itertools.count(1)
         bridge.on_message(self._on_message)
 
@@ -69,6 +65,8 @@ class Assistant:
     def cancel(self) -> None:
         if self.tts:
             self.tts.stop()
+        if self._meter:
+            self._meter.cancel()
         if self._task and not self._task.done():
             self._task.cancel()
 
@@ -81,10 +79,18 @@ class Assistant:
         self.bridge.send(VoiceMsg(state="listening"))
         if self.recorder:
             self.recorder.start()
+            self._meter = asyncio.create_task(self._send_mic_levels())
+
+    async def _send_mic_levels(self) -> None:
+        while True:
+            await asyncio.sleep(1 / LEVEL_HZ)
+            self.bridge.send(VoiceMsg(state="listening", level=self.recorder.level()))
 
     def ptt_up(self) -> None:
         if not self.recorder:
             return
+        if self._meter:
+            self._meter.cancel()
         audio = self.recorder.stop()
         self._task = asyncio.create_task(self._from_audio(audio))
 
@@ -122,24 +128,30 @@ class Assistant:
         return answer
 
     async def present(self, answer: Answer) -> None:
+        # Glow and spotlight are the live pipeline's job: they stay on for as
+        # long as the watched target is tracked, not just while speaking.
         answer_id = f"a{next(self._ids)}"
         self.bridge.send(AnswerMsg(answer_id=answer_id, segments=[Segment(id=0, text=answer.text, refs=answer.refs)]))
-        if answer.refs:
-            self.bridge.send(FocusMsg(refs=answer.refs, segment_id=0))
-            self.bridge.send(DimMsg(on=True, strength=self.dim_strength))
         audio = None
         if self.tts:
             audio = await asyncio.to_thread(self.tts.synthesize, answer.text)
         self.bridge.send(SegmentStartedMsg(answer_id=answer_id, segment_id=0))
-        self.bridge.send(VoiceMsg(state="speaking", transcript=None))
+        self.bridge.send(VoiceMsg(state="speaking"))
         if audio is not None:
-            await asyncio.to_thread(self.tts.play, *audio)
+            samples, rate = audio
+            levels = asyncio.create_task(self._send_voice_levels(envelope(samples, rate, LEVEL_HZ)))
+            try:
+                await asyncio.to_thread(self.tts.play, samples, rate)
+            finally:
+                levels.cancel()
         self.bridge.send(AnswerFinishedMsg(answer_id=answer_id))
         self.bridge.send(VoiceMsg(state="idle"))
-        if answer.refs:
-            await asyncio.sleep(self.hold_s)
-            self.bridge.send(DimMsg(on=False, strength=self.dim_strength))
-            self.bridge.send(FocusMsg(refs=[]))
+
+    async def _send_voice_levels(self, levels: list[float]) -> None:
+        start = time.monotonic()
+        for i, level in enumerate(levels):
+            await asyncio.sleep(max(0.0, start + i / LEVEL_HZ - time.monotonic()))
+            self.bridge.send(VoiceMsg(state="speaking", level=level))
 
     async def read_stdin(self, stop: asyncio.Event) -> None:
         """Type requests instead of speaking them (testing without a mic)."""

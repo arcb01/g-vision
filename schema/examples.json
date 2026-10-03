@@ -20,7 +20,7 @@
   {"v": 1, "ts": 1759500004.0, "type": "badges", "badges": [{"number": 1, "ref": "text:7"}, {"number": 2, "ref": "region:top_right"}]},
   {"v": 1, "ts": 1759500005.0, "type": "status", "perception_fps": 60.0, "game_fps": 144.0, "vram_used_mb": 5120.0,
    "latency_ms": {"detector": 12.5}, "components": {"capture": "running", "detector": "running"}},
-  {"v": 1, "ts": 1759500005.5, "type": "voice", "state": "thinking", "transcript": "where is the cow"},
+  {"v": 1, "ts": 1759500005.5, "type": "voice", "state": "listening", "transcript": null, "level": 0.42},
   {"v": 1, "ts": 1759500006.0, "type": "clear", "reason": "dismiss hotkey"},
   {"v": 1, "ts": 1759500007.0, "type": "config_changed", "changes": {"visual_effects.dim_strength": 0.4}}
 ]

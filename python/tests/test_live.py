@@ -55,7 +55,9 @@ def test_spotlight_dims_and_focuses_targets():
     dims = [m for msgs in out for m in msgs if isinstance(m, DimMsg)]
     assert [d.on for d in dims] == [True, True]  # from confirmation on, resent each step
     assert [m.refs for m in out[3] if isinstance(m, FocusMsg)] == [["obj:1"]]
-    gone = pipe.step(0.4, [])  # person lost: no targets left
+    lost = pipe.step(0.4, [])  # person lost: spotlight held through the grace period
+    assert any(isinstance(m, DimMsg) and m.on for m in lost)
+    gone = pipe.step(1.6, [])  # track removed: no targets left
     assert any(isinstance(m, DimMsg) and not m.on for m in gone)
 
 

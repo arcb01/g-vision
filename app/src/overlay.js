@@ -16,12 +16,20 @@ const PULSE_DEPTH = 0.2;
 // Developer aid until the debug overlay exists: show unhighlighted tracks faintly.
 const SHOW_ALL_TRACKS = true;
 const LOST_ALPHA = 0.4; // lost tracks stay at their last position, faded (plan 5.4)
+// Voice indicator: waves while you talk (cyan) and while G-VISION answers (gold).
+const VOICE_COLORS = { listening: 0x3de0ff, thinking: 0xffc83d, speaking: 0xffc83d };
+const VOICE_LABELS = { listening: 'Listening', thinking: 'Thinking', speaking: 'G-VISION' };
+const VOICE_BARS = 28;
+const VOICE_FADE_MS = 180;
+const VOICE_PILL = { w: 300, h: 64, bottom: 0.1 }; // bottom: share of screen height
+const CAPTION_WIDTH_PX = 640;
 
 const state = {
   objects: { frameTs: 0, list: [] },
   highlights: new Map(), // ref -> highlight message (with box for text:/region: refs)
   focus: new Set(),
   dim: { on: false, strength: 0.6, alpha: 0 },
+  voice: { state: 'idle', level: null, smooth: 0, alpha: 0, shown: 'idle', transcript: '', caption: '' },
 };
 
 function handle(msg) {
@@ -47,6 +55,16 @@ function handle(msg) {
     case 'dim':
       state.dim.on = msg.on;
       state.dim.strength = msg.strength;
+      break;
+    case 'voice':
+      if (msg.state !== state.voice.state) state.voice.level = null;
+      state.voice.state = msg.state;
+      if (msg.level != null) state.voice.level = msg.level;
+      if (msg.state === 'listening') state.voice.transcript = '';
+      if (msg.transcript != null) state.voice.transcript = msg.transcript;
+      break;
+    case 'answer':
+      state.voice.caption = msg.segments.map((s) => s.text).join(' ');
       break;
     case 'clear':
       state.highlights.clear();
@@ -86,6 +104,25 @@ function elements(nowS) {
   return out;
 }
 
+// Bars whose height follows the voice loudness, tallest in the middle.
+function drawWaves(g, cx, cy, width, level, color, alpha, t) {
+  const gap = width / VOICE_BARS;
+  for (let i = 0; i < VOICE_BARS; i++) {
+    const shape = Math.pow(Math.sin((Math.PI * (i + 0.5)) / VOICE_BARS), 0.8);
+    const wobble = 0.5 + 0.5 * Math.sin(t * 7 + i * 0.75) * Math.sin(t * 3.1 + i * 1.3);
+    const h = 4 + level * 40 * shape * (0.45 + wobble);
+    const x = cx - width / 2 + i * gap + gap * 0.2;
+    g.roundRect(x, cy - h / 2, gap * 0.6, h, gap * 0.3).fill({ color, alpha });
+  }
+}
+
+function drawThinking(g, cx, cy, color, alpha, t) {
+  for (let i = 0; i < 3; i++) {
+    const bounce = Math.max(0, Math.sin(t * 6 - i * 0.9));
+    g.circle(cx + (i - 1) * 18, cy - bounce * 8, 5).fill({ color, alpha: alpha * (0.5 + 0.5 * bounce) });
+  }
+}
+
 async function main() {
   const app = new PIXI.Application();
   await app.init({ resizeTo: window, backgroundAlpha: 0, antialias: true });
@@ -96,7 +133,18 @@ async function main() {
   glowLayer.filters = [new PIXI.BlurFilter({ strength: GLOW_BLUR, quality: 4 })];
   const outlineLayer = new PIXI.Graphics();
   const labelLayer = new PIXI.Container();
-  app.stage.addChild(dimLayer, glowLayer, outlineLayer, labelLayer);
+  const voiceGlow = new PIXI.Graphics();
+  voiceGlow.filters = [new PIXI.BlurFilter({ strength: 18, quality: 4 })];
+  const voiceLayer = new PIXI.Graphics();
+  const textStyle = { fontFamily: 'Segoe UI, sans-serif', fill: 0xffffff };
+  const voiceLabel = new PIXI.Text({ text: '', style: { ...textStyle, fontSize: 13, fontWeight: '600', letterSpacing: 1 } });
+  const caption = new PIXI.Text({
+    text: '',
+    style: { ...textStyle, fontSize: 20, wordWrap: true, wordWrapWidth: CAPTION_WIDTH_PX, align: 'center' },
+  });
+  voiceLabel.anchor.set(0.5, 1);
+  caption.anchor.set(0.5, 1);
+  app.stage.addChild(dimLayer, glowLayer, outlineLayer, labelLayer, voiceGlow, voiceLayer, voiceLabel, caption);
   const labels = new Map(); // ref -> PIXI.Text
 
   window.gvision.onMessage(handle);
@@ -169,7 +217,51 @@ async function main() {
         labels.delete(ref);
       }
     }
+
+    drawVoice(W, H, nowS, ticker.deltaMS);
   });
+
+  // Push-to-talk indicator at the bottom center: what you say and what
+  // G-VISION answers get their own color, with a soft glow along the screen edge.
+  function drawVoice(W, H, t, dtMs) {
+    const v = state.voice;
+    const active = v.state !== 'idle';
+    if (active) v.shown = v.state;
+    v.alpha += Math.sign((active ? 1 : 0) - v.alpha) * Math.min(Math.abs((active ? 1 : 0) - v.alpha), dtMs / VOICE_FADE_MS);
+    // No level (typed request, or no speech output): a gentle idle wave.
+    const target = v.level ?? (v.shown === 'thinking' ? 0 : 0.25);
+    v.smooth += (target - v.smooth) * Math.min(1, (dtMs / 1000) * 14);
+    voiceGlow.clear();
+    voiceLayer.clear();
+    voiceLabel.alpha = caption.alpha = v.alpha;
+    if (v.alpha < 0.01) return;
+
+    const color = VOICE_COLORS[v.shown];
+    const cx = W / 2;
+    const cy = H * (1 - VOICE_PILL.bottom);
+    const { w, h } = VOICE_PILL;
+    // Edge glow: brighter when louder, so it reads from the corner of the eye.
+    const edge = 0.25 + 0.35 * v.smooth;
+    voiceGlow.rect(cx - W * 0.3, H - 10, W * 0.6, 40).fill({ color, alpha: edge * v.alpha });
+    voiceGlow.roundRect(cx - w / 2, cy - h / 2, w, h, h / 2).stroke({ width: 10, color, alpha: 0.45 * v.alpha });
+    voiceLayer.roundRect(cx - w / 2, cy - h / 2, w, h, h / 2).fill({ color: 0x0b0d12, alpha: 0.72 * v.alpha });
+    voiceLayer.roundRect(cx - w / 2, cy - h / 2, w, h, h / 2).stroke({ width: 1.5, color, alpha: 0.8 * v.alpha });
+    if (v.shown === 'thinking') drawThinking(voiceLayer, cx, cy, color, v.alpha, t);
+    else drawWaves(voiceLayer, cx, cy, w - 48, v.smooth, color, v.alpha, t);
+
+    voiceLabel.text = VOICE_LABELS[v.shown].toUpperCase();
+    voiceLabel.style.fill = color;
+    voiceLabel.position.set(cx, cy - h / 2 - 6);
+    // Caption: what was heard while thinking, the answer while speaking.
+    caption.text = v.shown === 'speaking' ? v.caption : v.shown === 'thinking' && v.transcript ? `"${v.transcript}"` : '';
+    caption.position.set(cx, cy - h / 2 - 34);
+    if (caption.text) {
+      const pad = 10;
+      const b = { w: caption.width + 2 * pad, h: caption.height + pad };
+      voiceLayer.roundRect(cx - b.w / 2, cy - h / 2 - 34 - caption.height - pad / 2, b.w, b.h, 10)
+        .fill({ color: 0x0b0d12, alpha: 0.72 * v.alpha });
+    }
+  }
 }
 
 main();
