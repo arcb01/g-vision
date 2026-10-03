@@ -22,3 +22,7 @@ Thumbs.db
 # Ultralytics downloads weights next to where it runs
 *.pt
 mobileclip*.ts
+
+# Local launcher settings and process logs
+gvision.config.json
+logs/

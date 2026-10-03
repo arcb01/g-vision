@@ -55,6 +55,44 @@ function renderAnswer(activeSegment) {
   );
 }
 
+// Processes the app started (Qwen, Python backend): state, why one failed,
+// and a restart button each.
+function renderServices({ managed, error, services }) {
+  const table = document.getElementById('services');
+  if (error) {
+    renderRows(table, [['Config error', error]]);
+    return;
+  }
+  if (!managed) {
+    renderRows(table, [['Not managed by the app', 'start llama-server and Python by hand']]);
+    return;
+  }
+  table.replaceChildren(
+    ...services.map((s) => {
+      const tr = document.createElement('tr');
+      const name = document.createElement('td');
+      name.textContent = s.label;
+      const state = document.createElement('td');
+      const pill = document.createElement('span');
+      pill.className = `pill ${s.state}`;
+      pill.textContent = s.state;
+      state.appendChild(pill);
+      const detail = document.createElement('td');
+      detail.className = 'detail';
+      detail.textContent = s.detail;
+      const action = document.createElement('td');
+      if (s.state !== 'starting') {
+        const btn = document.createElement('button');
+        btn.textContent = s.state === 'ready' ? 'Restart' : 'Start';
+        btn.addEventListener('click', () => window.gvision.restartService(s.name));
+        action.appendChild(btn);
+      }
+      tr.append(name, state, detail, action);
+      return tr;
+    }),
+  );
+}
+
 // Push-to-talk state and what speech-to-text heard, to spot ASR mistakes.
 function renderVoice({ state, transcript }) {
   const pill = document.getElementById('voice-state');
@@ -66,6 +104,9 @@ function renderVoice({ state, transcript }) {
 
 window.gvision.onConnection(setConnection);
 window.gvision.getConnection().then(setConnection);
+window.gvision.onServices(renderServices);
+window.gvision.getServices().then(renderServices);
+document.getElementById('open-logs').addEventListener('click', () => window.gvision.openLogs());
 
 window.gvision.onMessage((m) => {
   counts.set(m.type, (counts.get(m.type) || 0) + 1);

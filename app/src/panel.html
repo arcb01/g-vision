@@ -13,6 +13,10 @@
       .pill.ok { background: #2e9e5b; color: #fff; }
       .pill.listening { background: #d9534f; color: #fff; }
       .pill.thinking, .pill.speaking { background: #ffc83d; color: #000; }
+      .pill.ready { background: #2e9e5b; color: #fff; }
+      .pill.starting { background: #ffc83d; color: #000; }
+      .pill.failed { background: #d9534f; color: #fff; }
+      .detail { font-size: 12px; opacity: 0.75; max-width: 520px; overflow-wrap: anywhere; }
       #heard { font-style: italic; }
       table { border-collapse: collapse; font-size: 13px; }
       td { padding: 2px 16px 2px 0; }
@@ -24,6 +28,10 @@
   </head>
   <body>
     <h1>G-VISION <span id="conn" class="pill">disconnected</span></h1>
+
+    <h2>Startup</h2>
+    <table id="services"><tr><td>Not managed by the app</td></tr></table>
+    <p class="row"><button id="open-logs">Open logs</button></p>
 
     <h2>Dashboard</h2>
     <table id="status"><tr><td>No status yet</td></tr></table>
