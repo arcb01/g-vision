@@ -2,7 +2,8 @@
 
     python -m gvision --demo                    synthetic objects and answers
     python -m gvision --live --watch person     capture + YOLOE + ByteTrack
-    python -m gvision --live --agent            + push-to-talk, Qwen, Kokoro: "find X"
+    python -m gvision --live --agent            + push-to-talk, Qwen, Kokoro: "find X",
+                                                and reading on-screen text (RapidOCR)
     python -m gvision --check-exclusion         is the overlay kept out of capture?
 """
 
@@ -71,14 +72,34 @@ async def _live(args: argparse.Namespace, bridge: Bridge, stop: asyncio.Event) -
         from gvision.world import WorldState
 
         world = WorldState()
-        jobs.append(_agent(args, bridge, world, stop))
+        text = await _text_watcher(args, bridge, source)
+        if text:
+            jobs.append(text.run(stop))
+        jobs.append(_agent(args, bridge, world, stop, text))
     pipeline = LivePipeline(bridge, source, detector, settings, world=world)
     await asyncio.gather(pipeline.run(stop), *jobs)
 
 
-async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.Event) -> None:
+async def _text_watcher(args: argparse.Namespace, bridge: Bridge, source):
+    """The background text watcher, or None when it is off or RapidOCR is missing."""
+    if args.no_text:
+        return None
+    from gvision.perception.ocr import RapidOcrEngine
+    from gvision.perception.text_watcher import TextWatcher
+
+    try:
+        engine = await asyncio.to_thread(RapidOcrEngine, args.ocr_side, args.ocr_threads)
+    except RuntimeError as e:
+        log.warning("not reading on-screen text: %s", e)
+        return None
+    log.info("text watcher: RapidOCR on the CPU, profiles in %s", args.text_profiles)
+    return TextWatcher(bridge, source, engine, profiles_dir=args.text_profiles)
+
+
+async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.Event, text=None) -> None:
     from gvision.agent.agent import Agent
     from gvision.agent.qwen import QwenClient
+    from gvision.agent.tools import ToolExecutor
     from gvision.assistant import Assistant
 
     qwen = QwenClient(args.qwen_url)
@@ -95,7 +116,7 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
 
         asr = await asyncio.to_thread(load_asr, args.asr, args.asr_device, args.whisper_model)
         recorder = Recorder()
-    assistant = Assistant(bridge, world, Agent(qwen, world), asr=asr, tts=tts, recorder=recorder)
+    assistant = Assistant(bridge, world, Agent(qwen, world, ToolExecutor(world, text=text)), asr=asr, tts=tts, recorder=recorder)
     if args.no_mic:
         await assistant.read_stdin(stop)
         return
@@ -139,6 +160,10 @@ def main() -> None:
     agent.add_argument("--voice", default="af_heart", help="Kokoro voice")
     agent.add_argument("--no-mic", action="store_true", help="type requests in the terminal instead of speaking")
     agent.add_argument("--no-tts", action="store_true", help="show answers without speaking them")
+    agent.add_argument("--no-text", action="store_true", help="don't read on-screen text")
+    agent.add_argument("--text-profiles", default="data/profiles", help="where learned text zones are saved per game")
+    agent.add_argument("--ocr-side", type=int, default=1280, help="text detection resolution (long side, px)")
+    agent.add_argument("--ocr-threads", type=int, default=4, help="CPU threads for RapidOCR")
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()

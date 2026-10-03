@@ -3,8 +3,9 @@
 The descriptions carry routing hints: on Arnau's PC they lifted Qwen3.5-2B
 from 14/20 to 17/20 correct tool calls, and its typical mistake was sending
 "where is X?" to ``query_state`` instead of ``set_watch``. Keep the list
-short; tools from the plan that are not built yet (read_region, look,
-get_recent_text, learn_label) are left out so the model can't pick them.
+short; tools from the plan that are not built yet (look, learn_label) are
+left out so the model can't pick them, and the text tools are only offered
+when the text watcher runs.
 """
 
 from __future__ import annotations
@@ -12,9 +13,12 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from gvision.world import WorldState, normalize_target, where
+
+if TYPE_CHECKING:
+    from gvision.perception.text_watcher import TextWatcher
 
 FIND_TIMEOUT_S = 1.5
 """How long ``set_watch`` waits for a confirmed track before answering
@@ -76,20 +80,71 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 
+# Plan 9.2's read_region and get_recent_text, named for what the player asks.
+TEXT_TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "read_text",
+            "description": (
+                "Read the text on screen: signs, quest and objective prompts, menus, dialogue, "
+                "chat, item names. Use this for EVERY 'what does it say', 'read X', 'what is my "
+                "quest' or 'what does the sign/menu/message say' request; never set_watch for text."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "about": {"type": "string", "description": "A word the text should contain, e.g. 'quest'. Optional."},
+                    "where": {"type": "string", "description": "Part of the screen if the player said, e.g. 'top right'."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "recent_text",
+            "description": (
+                "Text seen in the last minute, including messages and subtitles that are gone. "
+                "Use for 'what did that message say' or 'what did he just say'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "seconds": {"type": "integer", "description": "How far back, default 60."},
+                    "about": {"type": "string", "description": "A word the text should contain. Optional."},
+                },
+            },
+        },
+    },
+]
+
+MAX_TEXT_BLOCKS = 6
+
+
 @dataclass
 class ToolResult:
     content: dict[str, Any]
     refs: list[str] = field(default_factory=list)
     """Elements the answer is about, for the spotlight."""
+    text_refs: list[str] = field(default_factory=list)
+    """Text blocks the answer may be about; highlighted once the answer says which."""
 
     def json(self) -> str:
         return json.dumps(self.content)
 
 
 class ToolExecutor:
-    def __init__(self, world: WorldState, find_timeout: float = FIND_TIMEOUT_S) -> None:
+    def __init__(
+        self, world: WorldState, find_timeout: float = FIND_TIMEOUT_S, text: TextWatcher | None = None,
+    ) -> None:
         self.world = world
         self.find_timeout = find_timeout
+        self.text = text
+
+    @property
+    def specs(self) -> list[dict[str, Any]]:
+        return TOOLS + TEXT_TOOLS if self.text else TOOLS
 
     async def run(self, name: str, args: dict[str, Any]) -> ToolResult:
         try:
@@ -99,6 +154,10 @@ class ToolExecutor:
                 return self.clear_watch(**args)
             if name == "query_state":
                 return ToolResult(self.world.snapshot())
+            if name == "read_text" and self.text:
+                return await self.read_text(**args)
+            if name == "recent_text" and self.text:
+                return await self.recent_text(**args)
         except TypeError as e:  # wrong or missing arguments
             return ToolResult({"error": f"bad arguments for {name}: {e}"})
         return ToolResult({"error": f"unknown tool {name}"})
@@ -129,3 +188,69 @@ class ToolExecutor:
 
     def clear_watch(self, target: str | None = None) -> ToolResult:
         return ToolResult({"cleared": self.world.clear_watch(target or None)})
+
+    # --- text (plan 7.1 text watcher) ---------------------------------------
+
+    async def read_text(self, about: str | None = None, where: str | None = None) -> ToolResult:
+        from gvision.perception.text_watcher import matches_where
+
+        await self.text.refresh()  # read what is on screen right now
+        blocks = [b for b in self.text.visible() if matches_where(b.box, where)]
+        content: dict[str, Any] = {}
+        if about and blocks:
+            wanted = text_words(about)
+            matching = [b for b in blocks if wanted & text_words(b.text)]
+            if matching:
+                blocks = matching
+            else:
+                content["note"] = f"no text mentions '{about}'; this is all the text there"
+        blocks = blocks[:MAX_TEXT_BLOCKS]
+        content["text"] = [b.info() for b in blocks]
+        if not blocks:
+            content["note"] = "no readable text there"
+        return ToolResult(content, text_refs=[b.ref for b in blocks])
+
+    async def recent_text(self, seconds: int | float = 60, about: str | None = None) -> ToolResult:
+        await self.text.refresh()
+        try:
+            seconds = min(max(float(seconds), 1.0), 300.0)
+        except (TypeError, ValueError):
+            seconds = 60.0
+        now = time.time()
+        blocks = self.text.recent(seconds, now)
+        if about:
+            wanted = text_words(about)
+            blocks = [b for b in blocks if wanted & text_words(b.text)] or blocks
+        blocks = blocks[:MAX_TEXT_BLOCKS]
+        content: dict[str, Any] = {"text": [b.info(now) for b in blocks]}
+        if not blocks:
+            content["note"] = "no text seen in that time"
+        return ToolResult(content, text_refs=[b.ref for b in blocks if b.gone is None])
+
+    def highlight_text(self, answer: str, results: list[ToolResult]) -> list[str]:
+        """Highlight the text blocks the answer talks about (by shared words)."""
+        candidates = [ref for r in results for ref in r.text_refs]
+        if not self.text or not candidates:
+            return []
+        said = text_words(answer)
+        picked = []
+        for ref in candidates:
+            block = self.text.blocks.get(ref)
+            if not block:
+                continue
+            have = text_words(block.text)
+            if have and len(said & have) >= min(2, len(have)):
+                picked.append(ref)
+        if not picked and len(candidates) == 1:
+            picked = candidates
+        return self.text.highlight(picked[:3])
+
+
+_STOP = {"the", "and", "what", "does", "say", "says", "said", "that", "this", "with", "for", "you", "your",
+         "text", "there", "its", "it's", "are", "was", "has", "have", "from", "screen"}
+
+
+def text_words(text: str) -> set[str]:
+    from gvision.perception.text_watcher import words
+
+    return words(text) - _STOP
