@@ -348,6 +348,14 @@
           "title": "Latency Ms",
           "type": "object"
         },
+        "steps": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
         "screenshot": {
           "anyOf": [
             {
@@ -372,6 +380,7 @@
         "via",
         "tools",
         "latency_ms",
+        "steps",
         "screenshot"
       ],
       "title": "ExchangeMsg",
@@ -702,6 +711,67 @@
         "components"
       ],
       "title": "StatusMsg",
+      "type": "object"
+    },
+    "Step": {
+      "additionalProperties": false,
+      "description": "One thing done to answer a question, for the panel's log.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "asr",
+            "llm",
+            "detector",
+            "ocr",
+            "vision",
+            "tool",
+            "tts"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ms"
+        },
+        "ok": {
+          "default": true,
+          "title": "Ok",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "title",
+        "detail",
+        "ms",
+        "ok"
+      ],
+      "title": "Step",
       "type": "object"
     },
     "TrackedObject": {

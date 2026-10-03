@@ -53,6 +53,7 @@ class WhisperASR:
         compute_type = "float16" if device.startswith("cuda") else "int8"
         self.model = WhisperModel(model, device=device, compute_type=compute_type)
         self.language = language
+        self.name = f"Whisper {model}"
         log.info("faster-whisper %s on %s ready in %.1f s", model, device, time.perf_counter() - t0)
 
     def transcribe(self, audio: np.ndarray) -> str:
@@ -71,6 +72,7 @@ class NemotronASR:
         from transformers import pipeline
 
         dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
+        self.name = "Nemotron"
         self.pipe = pipeline("automatic-speech-recognition", model=model, device=device, torch_dtype=dtype)
 
     def transcribe(self, audio: np.ndarray) -> str:

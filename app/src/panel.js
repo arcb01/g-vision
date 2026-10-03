@@ -18,6 +18,9 @@ const TOOL_NAMES = {
   recent_text: 'Recent text',
   look: 'Look back',
 };
+const STEP_KINDS = {
+  asr: 'Speech', llm: 'Qwen', detector: 'Detector', ocr: 'OCR', vision: 'Vision', tool: 'Tool', tts: 'Voice',
+};
 const VOICE_LABELS = { idle: 'Ready', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking' };
 
 function msg(type, fields = {}) {
@@ -226,6 +229,22 @@ function highlight(text, query) {
   return out;
 }
 
+// What it took to answer: speech-to-text, each Qwen call, tools, voice.
+function stepsPanel(entry) {
+  const steps = entry.steps || [];
+  if (!steps.length) return null;
+  const failed = steps.filter((s) => !s.ok).length;
+  return el('details', { class: 'steps' },
+    el('summary', {}, icon('steps'), `How it answered · ${steps.length} step${steps.length === 1 ? '' : 's'}`,
+      failed ? el('span', { class: 'steps-bad', text: `${failed} problem${failed === 1 ? '' : 's'}` }) : null),
+    el('ol', {}, ...steps.map((s) => el('li', { class: `step ${s.kind}${s.ok ? '' : ' bad'}` },
+      el('div', { class: 'step-head' },
+        el('span', { class: 'step-kind', text: STEP_KINDS[s.kind] || s.kind }),
+        el('span', { class: 'step-title', text: s.title }),
+        s.ms != null ? el('span', { class: 'step-ms', text: seconds(s.ms) }) : null),
+      s.detail ? el('pre', { class: 'step-detail', text: s.detail }) : null))));
+}
+
 function exchangeCard(entry, query, fresh) {
   const total = Object.values(entry.latencyMs || {}).reduce((a, b) => a + b, 0);
   const voice = entry.via === 'voice';
@@ -240,7 +259,8 @@ function exchangeCard(entry, query, fresh) {
       el('div', { class: 'ex-foot' },
         ...(entry.tools || []).map((t) => el('span', { class: 'chip', title: t }, icon('tool'), TOOL_NAMES[t] || t)),
         (entry.tools || []).length ? null : el('span', { class: 'chip', text: 'No tools' }),
-        total ? el('span', { class: 'latency', text: `answered in ${seconds(total)}`, title: Object.entries(entry.latencyMs).map(([k, v]) => `${k}: ${seconds(v)}`).join('\n') }) : null)));
+        total ? el('span', { class: 'latency', text: `answered in ${seconds(total)}`, title: Object.entries(entry.latencyMs).map(([k, v]) => `${k}: ${seconds(v)}`).join('\n') }) : null),
+      stepsPanel(entry)));
 }
 
 function renderLog(freshId = null) {

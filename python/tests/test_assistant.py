@@ -125,6 +125,10 @@ def test_each_answer_goes_to_the_conversation_log_with_the_screen():
     assert ex.screenshot == "data:image/jpeg;base64,AAAA" and encoded == [(4, 4, 3)]
     assert before <= ex.asked_ts <= ex.ts
     assert parse(dump(ex)) == ex
+    assert [(s.kind, s.title) for s in ex.steps] == [
+        ("llm", "Qwen chooses what to do"), ("detector", "Detector: find and highlight"), ("llm", "Qwen writes the answer"),
+    ]
+    assert "set_watch" in ex.steps[0].detail and '"target": "cow"' in ex.steps[1].detail
 
 
 def test_conversation_log_without_a_screen():
@@ -138,6 +142,75 @@ def test_conversation_log_without_a_screen():
 
     (ex,) = [m for m in asyncio.run(run()) if isinstance(m, ExchangeMsg)]
     assert ex.answer == "Hello." and ex.screenshot is None and ex.tools == []
+
+
+class FakeTTS:
+    voice = "af_heart"
+
+    def synthesize(self, text):
+        return np.zeros(12000, np.float32), 24000
+
+    def play(self, samples, rate):
+        pass
+
+    def stop(self):
+        pass
+
+
+class FakeASR:
+    name = "Whisper medium"
+
+    def transcribe(self, audio):
+        return "hello there"
+
+
+class FakeRecorder:
+    def start(self):
+        pass
+
+    def stop(self):
+        return np.zeros(16000, np.float32)
+
+    def level(self):
+        return 0.0
+
+
+def test_log_steps_cover_speech_qwen_and_voice():
+    async def run():
+        bridge = FakeBridge()
+        world = WorldState()
+        assistant = Assistant(bridge, world, Agent(FakeQwen(Reply("Hi!")), world),
+                              asr=FakeASR(), tts=FakeTTS(), recorder=FakeRecorder())
+        assistant.ptt_down()
+        assistant.ptt_up()
+        await assistant._task
+        await asyncio.sleep(0.01)
+        return bridge.sent
+
+    (ex,) = [m for m in asyncio.run(run()) if isinstance(m, ExchangeMsg)]
+    assert ex.via == "voice" and ex.question == "hello there"
+    assert [s.kind for s in ex.steps] == ["asr", "llm", "tts"]
+    assert ex.steps[0].title == "Speech-to-text: Whisper medium" and "1.0 s clip" in ex.steps[0].detail
+    assert ex.steps[2].detail == "0.5 s of speech"
+
+
+def test_log_shows_a_failed_qwen_request():
+    import httpx
+
+    class DownQwen:
+        async def chat(self, *a, **k):
+            raise httpx.ConnectError("refused")
+
+    async def run():
+        bridge = FakeBridge()
+        world = WorldState()
+        await Assistant(bridge, world, Agent(DownQwen(), world)).ask("hi")
+        await asyncio.sleep(0.01)
+        return bridge.sent
+
+    (ex,) = [m for m in asyncio.run(run()) if isinstance(m, ExchangeMsg)]
+    assert [(s.title, s.ok) for s in ex.steps] == [("Qwen request failed", False)]
+    assert "refused" in ex.steps[0].detail
 
 
 def test_dismiss_cancels_and_clears_watches():

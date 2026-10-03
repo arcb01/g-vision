@@ -15,7 +15,8 @@ const JPEG = `data:image/jpeg;base64,${Buffer.from('fake jpeg').toString('base64
 function exchange(n, fields = {}) {
   return {
     v: 1, ts: 1000 + n + 1, type: 'exchange', exchange_id: `a${n}`, asked_ts: 1000 + n, question: `q${n}`,
-    answer: `a${n}`, via: 'voice', tools: ['set_watch'], latency_ms: { llm_tool_call: 300 }, screenshot: JPEG, ...fields,
+    answer: `a${n}`, via: 'voice', tools: ['set_watch'], latency_ms: { llm_tool_call: 300 }, screenshot: JPEG,
+    steps: [{ kind: 'llm', title: 'Qwen chooses what to do', detail: 'called set_watch', ms: 300, ok: true }], ...fields,
   };
 }
 
@@ -30,6 +31,7 @@ test('the conversation log keeps exchanges and screenshots across restarts', () 
 
   const reopened = new ConversationLog(dir).list();
   assert.deepStrictEqual(reopened.map((e) => [e.question, e.via, e.image != null]), [['q1', 'voice', true], ['q2', 'typed', false]]);
+  assert.strictEqual(reopened[0].steps[0].title, 'Qwen chooses what to do');
 });
 
 test('the conversation log drops the oldest exchanges and their screenshots past the cap', () => {

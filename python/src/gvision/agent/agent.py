@@ -14,7 +14,8 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from gvision.agent.qwen import Reply
-from gvision.agent.tools import ToolExecutor, ToolResult
+from gvision.agent.tools import ToolExecutor, ToolResult, brief
+from gvision.protocol import Step
 from gvision.world import WorldState
 
 log = logging.getLogger(__name__)
@@ -52,6 +53,8 @@ class Answer:
     text_cues: list[tuple[float, str]] = field(default_factory=list)
     """(where in the text it starts being read, 0..1; text block ref): the
     block lights up when the voice reaches it."""
+    steps: list[Step] = field(default_factory=list)
+    """What it took, for the panel's log."""
 
 
 def fallback_text(results: list[ToolResult]) -> str:
@@ -91,26 +94,41 @@ class Agent:
         ]
         reply = await self.qwen.chat(messages, tools=self.tools.specs)
         latency = {"llm_tool_call": (time.perf_counter() - t0) * 1000}
+        calls = ", ".join(f"{c.name}({brief(c.arguments, 150)})" for c in reply.tool_calls)
+        steps = [Step(
+            kind="llm", title="Qwen chooses what to do", ms=round(latency["llm_tool_call"], 1),
+            detail=f"called {calls}" if calls else f"answered without a tool: {reply.content!r}",
+            ok=bool(calls or reply.content),
+        )]
         if not reply.tool_calls:
-            return Answer(reply.content or "Sorry, I didn't get that.", latency_ms=latency)
+            return Answer(reply.content or "Sorry, I didn't get that.", latency_ms=latency, steps=steps)
 
         results: list[ToolResult] = []
         messages.append({"role": "assistant", "content": reply.content or "", "tool_calls": reply.raw.get("tool_calls")})
         t1 = time.perf_counter()
         for call in reply.tool_calls:
             log.info("tool call: %s(%s)", call.name, call.arguments)
+            t = time.perf_counter()
             result = await self.tools.run(call.name, call.arguments)
+            steps.append(self.tools.step(call.name, call.arguments, result, (time.perf_counter() - t) * 1000))
             results.append(result)
             messages.append({"role": "tool", "tool_call_id": call.id, "content": result.json()})
         latency["tools"] = (time.perf_counter() - t1) * 1000
         refs = [ref for r in results for ref in r.refs]
         if all(r.speak for r in results):
-            return Answer(" ".join(r.speak for r in results), refs, [c.name for c in reply.tool_calls], latency)
+            steps.append(Step(kind="llm", title="Answer taken from the tool", detail="no second Qwen call needed"))
+            return Answer(" ".join(r.speak for r in results), refs, [c.name for c in reply.tool_calls], latency,
+                          steps=steps)
 
         t2 = time.perf_counter()
         final = await self.qwen.chat(messages, max_tokens=60)
         latency["llm_answer"] = (time.perf_counter() - t2) * 1000
         text = final.content or fallback_text(results)
+        steps.append(Step(
+            kind="llm", title="Qwen writes the answer", ms=round(latency["llm_answer"], 1),
+            detail=final.content if final.content else f"no answer; used the built-in fallback: {text!r}",
+            ok=bool(final.content),
+        ))
         cues = self.tools.text_cues(text, results)
         refs += [ref for _, ref in cues]
-        return Answer(text, refs, [c.name for c in reply.tool_calls], latency, cues)
+        return Answer(text, refs, [c.name for c in reply.tool_calls], latency, cues, steps)

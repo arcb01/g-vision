@@ -173,6 +173,8 @@ def test_read_text_glow_follows_the_voice(monkeypatch):
     quest = result["Quest: find the old lighthouse\nTalk to the blacksmith"]
     press = result["Press E to open the door"]
     assert [ref for _, ref in answer.text_cues] == [quest, press]  # in the order they are spoken
+    assert [(s.kind, s.ok) for s in answer.steps] == [("llm", True), ("ocr", True), ("llm", True)]
+    assert "read_text(" in answer.steps[1].detail and "lighthouse" in answer.steps[1].detail
     assert answer.text_cues[0][0] < 0.3 < answer.text_cues[1][0]
     highlights = [m for m in bridge.sent if isinstance(m, HighlightMsg)]
     assert {(h.ref, h.color_role) for h in highlights} == {(quest, "info"), (press, "info")}  # not HP

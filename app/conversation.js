@@ -57,6 +57,7 @@ class ConversationLog {
       via: msg.via,
       tools: msg.tools,
       latencyMs: msg.latency_ms,
+      steps: msg.steps || [],
       image,
     };
     entries.push(entry);
