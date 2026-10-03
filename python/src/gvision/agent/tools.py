@@ -74,9 +74,10 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "query_state",
             "description": (
-                "List the objects currently tracked, with counts and positions. "
-                "Only for counting or listing questions such as 'how many X are there' or "
-                "'what do you see'. For 'where is X' use set_watch instead."
+                "List the objects the detector is tracking (creatures, people, items in the world), "
+                "with counts and positions. Only for counting or listing those, such as 'how many "
+                "zombies are there' or 'what do you see'. For 'where is X' use set_watch instead. "
+                "Numbers shown on the HUD (ammo, bullets, health, money, time) are text: use read_text."
             ),
             "parameters": {"type": "object", "properties": {}},
         },
@@ -92,13 +93,13 @@ TEXT_TOOLS: list[dict[str, Any]] = [
             "name": "read_text",
             "description": (
                 "Read the text on screen: signs, quest and objective prompts, menus, dialogue, "
-                "chat, item names. Use this for EVERY 'what does it say', 'read X', 'what is my "
+                "chat, item names, and HUD numbers like ammo, health or money. Use this for EVERY 'what does it say', 'read X', 'what is my "
                 "quest' or 'what does the sign/menu/message say' request; never set_watch for text."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "about": {"type": "string", "description": "A word the text should contain, e.g. 'quest'. Optional."},
+                    "about": {"type": "string", "description": "A word from the player's question the text should contain. Optional."},
                     "where": {"type": "string", "description": "Part of the screen if the player said, e.g. 'top right'."},
                 },
             },

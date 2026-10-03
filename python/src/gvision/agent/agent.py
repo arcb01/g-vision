@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -30,7 +31,8 @@ can't see it yet and that you're watching for it.
 {abilities}Current state: {state}"""
 
 CAN_READ = """\
-- For any question about text on screen (signs, quests, menus, messages), call read_text, \
+- For any question about text on screen (signs, quests, menus, messages, or HUD numbers \
+like ammo, health and money), call read_text, \
 or recent_text for text that already went away. Quote the words that answer the question.
 """
 CANNOT_READ = "- You can't read text yet; say so briefly if asked.\n"
@@ -73,6 +75,12 @@ def fallback_text(results: list[ToolResult]) -> str:
     return "Done."
 
 
+def mentions_tracked(request: str, snapshot: dict[str, Any]) -> bool:
+    """Whether the request names any of the objects being tracked."""
+    words = {w.rstrip("s") for w in re.findall(r"[a-z]+", request.lower())}
+    return any(w.rstrip("s") in words for label in snapshot.get("counts", {}) for w in label.lower().split())
+
+
 class Agent:
     def __init__(self, qwen: Chat, world: WorldState, tools: ToolExecutor | None = None) -> None:
         self.qwen = qwen
@@ -113,6 +121,22 @@ class Agent:
             steps.append(self.tools.step(call.name, call.arguments, result, (time.perf_counter() - t) * 1000))
             results.append(result)
             messages.append({"role": "tool", "tool_call_id": call.id, "content": result.json()})
+        names = [c.name for c in reply.tool_calls]
+        if "query_state" in names and self.tools.has("look") and not any(r.speak for r in results):
+            tracked = results[names.index("query_state")].content
+            if not mentions_tracked(request, tracked):
+                # Asked about something the detector doesn't track (ammo, a
+                # door's colour...): let vision answer instead of "can't see".
+                steps.append(Step(kind="tool", title="Nothing tracked matches: look instead",
+                                  detail=f"tracked: {sorted(tracked.get('counts', {})) or 'nothing'}"))
+                t = time.perf_counter()
+                args = {"question": request, "seconds": 0}
+                look = await self.tools.run("look", args)
+                steps.append(self.tools.step("look", args, look, (time.perf_counter() - t) * 1000))
+                if look.speak:
+                    latency["tools"] = (time.perf_counter() - t1) * 1000
+                    steps.append(Step(kind="llm", title="Answer taken from the tool", detail="no second Qwen call needed"))
+                    return Answer(look.speak, look.refs, names + ["look"], latency, steps=steps)
         latency["tools"] = (time.perf_counter() - t1) * 1000
         refs = [ref for r in results for ref in r.refs]
         if all(r.speak for r in results):
