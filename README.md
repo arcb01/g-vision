@@ -122,7 +122,7 @@ Python process.
    python -m gvision --live --agent --prompts person
    ```
 
-Hold **F8**, ask "where's the cow?" and let go. The panel shows what was
+Hold **Alt+3**, ask "where's the cow?" and let go. The panel shows what was
 heard; Qwen calls `set_watch(["cow"])`, "cow" is added to YOLOE's prompts,
 and once the tracker confirms one it glows gold, the screen dims around it
 and Kokoro answers ("The cow is on your left."). If nothing turns up within
@@ -131,7 +131,7 @@ as one comes into view. Each new push-to-talk replaces the previous watch;
 `Ctrl+Shift+X` clears everything and stops speech. Ask "how many people are
 there?" for a count, or "stop highlighting" to clear.
 
-Useful options: `--ptt-key caps_lock`, `--whisper-model small` (faster, less
+Useful options: `--ptt-key f8` (any key, or a combo like `ctrl+shift+space`), `--whisper-model small` (faster, less
 VRAM), `--asr nemotron` (needs `transformers`; much worse on accented English
 in our tests), `--voice am_michael`, `--no-mic` (type requests in the
 terminal), `--no-tts`, `--qwen-url`. The first run downloads the Whisper
