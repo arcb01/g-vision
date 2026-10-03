@@ -21,8 +21,6 @@ log = logging.getLogger(__name__)
 DEFAULT_MODEL = "yoloe-26s-seg.pt"
 MODELS_DIR = Path("models")
 MAX_OUTLINE_POINTS = 48
-MIN_OUTLINE_SHARE = 0.7
-"""The largest mask piece must hold this share of the area to be drawn."""
 
 
 @dataclass
@@ -69,10 +67,12 @@ def simplify_polygon(points: np.ndarray, epsilon: float, max_points: int = MAX_O
 
 
 def _outline(mask: np.ndarray, orig_shape: tuple[int, int]) -> list[tuple[float, float]] | None:
-    """Normalized outline polygon of a mask, or ``None`` to fall back to the box.
+    """Normalized outline polygon of a mask, or ``None`` if the mask is empty.
 
     Uses the largest contour only: Ultralytics' own polygons join every piece
     of a split mask (an object occluded in the middle) with bridging lines.
+    The overlay only draws contours, so a fragmented mask still gives its
+    largest piece rather than falling back to the box.
     """
     import cv2
     from ultralytics.utils import ops
@@ -82,8 +82,8 @@ def _outline(mask: np.ndarray, orig_shape: tuple[int, int]) -> list[tuple[float,
         return None
     areas = np.array([cv2.contourArea(c) for c in contours])
     i = int(areas.argmax())
-    if areas[i] < MIN_OUTLINE_SHARE * areas.sum() or len(contours[i]) < 3:
-        return None  # badly fragmented: the box is the honest shape
+    if len(contours[i]) < 3:
+        return None
     xyn = ops.scale_coords(mask.shape, contours[i].reshape(-1, 2).astype(np.float32), orig_shape, normalize=True)
     h, w = orig_shape
     # Simplify in pixels so the tolerance is the same on both axes.

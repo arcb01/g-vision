@@ -6,30 +6,29 @@ const COLORS = { target: 0xffc83d, danger: 0xff4d4d, info: 0x3de0ff };
 const SUBTLE = 0xffffff;
 const DIM_FADE_MS = 200;
 const MAX_EXTRAPOLATION_S = 0.25;
-const CUTOUT_PAD_PX = 12;
 // Glow: a blurred wide stroke under a dark edge and a bright core (plan 6.3).
 const GLOW_WIDTH_PX = 14;
 const GLOW_BLUR = 10;
 const CORE_WIDTH_PX = { focused: 4, mentioned: 3 };
 const PULSE_HZ = 1; // slow, well below flashing (plan 6.3)
 const PULSE_DEPTH = 0.2;
-// Developer aid until the debug overlay exists: show unhighlighted tracks faintly.
+// Developer aid until the debug overlay exists: show unhighlighted tracks faintly
+// (Python only sends them with --show-all). No text is drawn on screen.
 const SHOW_ALL_TRACKS = true;
 const LOST_ALPHA = 0.4; // lost tracks stay at their last position, faded (plan 5.4)
 // Voice indicator: waves while you talk (cyan) and while G-VISION answers (gold).
 const VOICE_COLORS = { listening: 0x3de0ff, thinking: 0xffc83d, speaking: 0xffc83d };
-const VOICE_LABELS = { listening: 'Listening', thinking: 'Thinking', speaking: 'G-VISION' };
 const VOICE_BARS = 28;
 const VOICE_FADE_MS = 180;
 const VOICE_PILL = { w: 300, h: 64, bottom: 0.1 }; // bottom: share of screen height
-const CAPTION_WIDTH_PX = 640;
+const FILL_ALPHA = 0.22; // see-through tint inside highlighted contours
 
 const state = {
   objects: { frameTs: 0, list: [] },
   highlights: new Map(), // ref -> highlight message (with box for text:/region: refs)
   focus: new Set(),
   dim: { on: false, strength: 0.6, alpha: 0 },
-  voice: { state: 'idle', level: null, smooth: 0, alpha: 0, shown: 'idle', transcript: '', caption: '' },
+  voice: { state: 'idle', level: null, smooth: 0, alpha: 0, shown: 'idle' },
 };
 
 function handle(msg) {
@@ -60,11 +59,6 @@ function handle(msg) {
       if (msg.state !== state.voice.state) state.voice.level = null;
       state.voice.state = msg.state;
       if (msg.level != null) state.voice.level = msg.level;
-      if (msg.state === 'listening') state.voice.transcript = '';
-      if (msg.transcript != null) state.voice.transcript = msg.transcript;
-      break;
-    case 'answer':
-      state.voice.caption = msg.segments.map((s) => s.text).join(' ');
       break;
     case 'clear':
       state.highlights.clear();
@@ -96,10 +90,10 @@ function elements(nowS) {
   for (const obj of state.objects.list) {
     tracked.add(obj.ref);
     if (obj.status === 'tentative') continue; // only confirmed objects glow
-    out.push({ ref: obj.ref, label: obj.label, lost: obj.status === 'lost', ...extrapolated(obj, nowS) });
+    out.push({ ref: obj.ref, lost: obj.status === 'lost', ...extrapolated(obj, nowS) });
   }
   for (const [ref, hl] of state.highlights) {
-    if (!tracked.has(ref) && hl.box) out.push({ ref, label: null, lost: false, box: hl.box, outline: null });
+    if (!tracked.has(ref) && hl.box) out.push({ ref, lost: false, box: hl.box, outline: null });
   }
   return out;
 }
@@ -132,20 +126,10 @@ async function main() {
   const glowLayer = new PIXI.Graphics();
   glowLayer.filters = [new PIXI.BlurFilter({ strength: GLOW_BLUR, quality: 4 })];
   const outlineLayer = new PIXI.Graphics();
-  const labelLayer = new PIXI.Container();
   const voiceGlow = new PIXI.Graphics();
   voiceGlow.filters = [new PIXI.BlurFilter({ strength: 18, quality: 4 })];
   const voiceLayer = new PIXI.Graphics();
-  const textStyle = { fontFamily: 'Segoe UI, sans-serif', fill: 0xffffff };
-  const voiceLabel = new PIXI.Text({ text: '', style: { ...textStyle, fontSize: 13, fontWeight: '600', letterSpacing: 1 } });
-  const caption = new PIXI.Text({
-    text: '',
-    style: { ...textStyle, fontSize: 20, wordWrap: true, wordWrapWidth: CAPTION_WIDTH_PX, align: 'center' },
-  });
-  voiceLabel.anchor.set(0.5, 1);
-  caption.anchor.set(0.5, 1);
-  app.stage.addChild(dimLayer, glowLayer, outlineLayer, labelLayer, voiceGlow, voiceLayer, voiceLabel, caption);
-  const labels = new Map(); // ref -> PIXI.Text
+  app.stage.addChild(dimLayer, glowLayer, outlineLayer, voiceGlow, voiceLayer);
 
   window.gvision.onMessage(handle);
 
@@ -163,25 +147,28 @@ async function main() {
       px: { x: el.box.x * W, y: el.box.y * H, w: el.box.w * W, h: el.box.h * H },
       poly: el.outline ? el.outline.flatMap(([x, y]) => [x * W, y * H]) : null,
     }));
-    // Mask outline when the detector gave one, otherwise the rounded box.
-    const shape = (g, { px, poly }) => (poly ? g.poly(poly, true) : g.roundRect(px.x, px.y, px.w, px.h, 6));
+    // Objects are drawn by their mask contour. Without one (rare: the tracker
+    // carries the last contour over), an ellipse rather than a box; text and
+    // regions keep their rounded box.
+    const shape = (g, { ref, px, poly }) => {
+      if (poly) return g.poly(poly, true);
+      if (ref.startsWith('obj:')) return g.ellipse(px.x + px.w / 2, px.y + px.h / 2, px.w / 2, px.h / 2);
+      return g.roundRect(px.x, px.y, px.w, px.h, 6);
+    };
 
-    // Dim layer with cut-outs around focused elements (box-shaped for now).
+    // Dim layer with cut-outs following the focused elements' contours.
     dimLayer.clear();
     if (state.dim.alpha > 0.001) {
       dimLayer.rect(0, 0, W, H).fill({ color: 0x000000, alpha: state.dim.alpha });
-      for (const { ref, px } of els) {
-        if (state.focus.has(ref)) {
-          dimLayer.roundRect(px.x - CUTOUT_PAD_PX, px.y - CUTOUT_PAD_PX, px.w + 2 * CUTOUT_PAD_PX, px.h + 2 * CUTOUT_PAD_PX, 12).cut();
-        }
+      for (const el of els) {
+        if (state.focus.has(el.ref)) shape(dimLayer, el).cut();
       }
     }
 
     glowLayer.clear();
     outlineLayer.clear();
-    const seen = new Set();
     for (const el of els) {
-      const { ref, label: text, px, lost } = el;
+      const { ref, lost } = el;
       const hl = state.highlights.get(ref);
       if (!hl && !SHOW_ALL_TRACKS) continue;
       const focused = state.focus.has(ref);
@@ -193,36 +180,18 @@ async function main() {
         alpha = (focused || state.focus.size === 0 ? 1 : 0.7) * fade;
         const glowAlpha = (focused ? pulse : 0.5) * fade;
         shape(glowLayer, el).stroke({ width: GLOW_WIDTH_PX, color, alpha: glowAlpha, join: 'round' });
-        if (focused) shape(glowLayer, el).fill({ color, alpha: 0.12 * pulse * fade });
+        shape(outlineLayer, el).fill({ color, alpha: FILL_ALPHA * (focused ? pulse : 0.7) * fade });
       }
       const core = focused ? CORE_WIDTH_PX.focused : CORE_WIDTH_PX.mentioned;
       shape(outlineLayer, el).stroke({ width: core + 4, color: 0x000000, alpha: alpha * 0.7, join: 'round' });
       shape(outlineLayer, el).stroke({ width: core, color, alpha, join: 'round' });
-
-      if (text == null) continue;
-      let label = labels.get(ref);
-      if (!label) {
-        label = new PIXI.Text({ text, style: { fontFamily: 'Segoe UI, sans-serif', fontSize: 14, fill: 0xffffff, stroke: { color: 0x000000, width: 3 } } });
-        labelLayer.addChild(label);
-        labels.set(ref, label);
-      }
-      label.text = text;
-      label.alpha = alpha;
-      label.position.set(px.x, px.y - 22);
-      seen.add(ref);
-    }
-    for (const [ref, label] of labels) {
-      if (!seen.has(ref)) {
-        label.destroy();
-        labels.delete(ref);
-      }
     }
 
     drawVoice(W, H, nowS, ticker.deltaMS);
   });
 
-  // Push-to-talk indicator at the bottom center: what you say and what
-  // G-VISION answers get their own color, with a soft glow along the screen edge.
+  // Push-to-talk indicator at the bottom center, no text: your voice is cyan,
+  // G-VISION's answer is gold, with a soft glow along the screen edge.
   function drawVoice(W, H, t, dtMs) {
     const v = state.voice;
     const active = v.state !== 'idle';
@@ -233,7 +202,6 @@ async function main() {
     v.smooth += (target - v.smooth) * Math.min(1, (dtMs / 1000) * 14);
     voiceGlow.clear();
     voiceLayer.clear();
-    voiceLabel.alpha = caption.alpha = v.alpha;
     if (v.alpha < 0.01) return;
 
     const color = VOICE_COLORS[v.shown];
@@ -248,19 +216,6 @@ async function main() {
     voiceLayer.roundRect(cx - w / 2, cy - h / 2, w, h, h / 2).stroke({ width: 1.5, color, alpha: 0.8 * v.alpha });
     if (v.shown === 'thinking') drawThinking(voiceLayer, cx, cy, color, v.alpha, t);
     else drawWaves(voiceLayer, cx, cy, w - 48, v.smooth, color, v.alpha, t);
-
-    voiceLabel.text = VOICE_LABELS[v.shown].toUpperCase();
-    voiceLabel.style.fill = color;
-    voiceLabel.position.set(cx, cy - h / 2 - 6);
-    // Caption: what was heard while thinking, the answer while speaking.
-    caption.text = v.shown === 'speaking' ? v.caption : v.shown === 'thinking' && v.transcript ? `"${v.transcript}"` : '';
-    caption.position.set(cx, cy - h / 2 - 34);
-    if (caption.text) {
-      const pad = 10;
-      const b = { w: caption.width + 2 * pad, h: caption.height + pad };
-      voiceLayer.roundRect(cx - b.w / 2, cy - h / 2 - 34 - caption.height - pad / 2, b.w, b.h, 10)
-        .fill({ color: 0x0b0d12, alpha: 0.72 * v.alpha });
-    }
   }
 }
 

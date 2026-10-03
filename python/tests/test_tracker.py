@@ -91,3 +91,14 @@ def test_simplify_polygon_keeps_corners():
     out = simplify_polygon(pts, epsilon=1.0)
     assert len(out) == 4
     assert {tuple(p) for p in out.round()} == {(0, 0), (100, 0), (100, 100), (0, 100)}
+
+
+def test_outline_carried_over_when_a_frame_has_no_mask():
+    from gvision.perception.detector import Detection
+    from gvision.perception.tracker import ByteTracker
+
+    tracker = ByteTracker()
+    outline = [(0.1, 0.1), (0.2, 0.1), (0.15, 0.3)]
+    tracker.update([Detection((0.1, 0.1, 0.2, 0.3), 0.9, "cow", outline)], 0.0)
+    (tr,) = tracker.update([Detection((0.12, 0.1, 0.22, 0.3), 0.9, "cow")], 0.1)  # moved right, no mask
+    assert np.ravel(tr.outline) == pytest.approx([0.12, 0.1, 0.22, 0.1, 0.17, 0.3])

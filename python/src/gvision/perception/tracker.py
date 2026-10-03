@@ -43,6 +43,15 @@ class TrackerConfig:
     """How long a lost track is kept before it is removed."""
 
 
+def _refit(outline, old_box, new_box):
+    """Move and scale a normalized outline from one xyxy box to another."""
+    if not outline:
+        return None
+    ow, oh = max(old_box[2] - old_box[0], 1e-6), max(old_box[3] - old_box[1], 1e-6)
+    sx, sy = (new_box[2] - new_box[0]) / ow, (new_box[3] - new_box[1]) / oh
+    return [(float(new_box[0] + (x - old_box[0]) * sx), float(new_box[1] + (y - old_box[1]) * sy)) for x, y in outline]
+
+
 class _Kalman:
     """Constant-velocity filter over (cx, cy, w, h) with time-based steps."""
 
@@ -191,8 +200,11 @@ class ByteTracker:
             tr.kf.update(z)
         tr.hits += 1
         tr.confidence = det.confidence
-        tr.outline = det.outline
-        tr.last_box = np.asarray(det.box, dtype=float)
+        box = np.asarray(det.box, dtype=float)
+        # No mask this frame: carry the last outline over to the new box, so
+        # the overlay keeps drawing a contour instead of flashing a rectangle.
+        tr.outline = det.outline or _refit(tr.outline, tr.last_box, box)
+        tr.last_box = box
         tr.last_seen = t
         if tr.status == "tentative" and tr.hits >= self.config.min_hits:
             tr.status = "confirmed"
