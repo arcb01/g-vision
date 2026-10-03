@@ -13,4 +13,9 @@ contextBridge.exposeInMainWorld('gvision', {
   stopService: (name) => ipcRenderer.invoke('gvision:stop-service', name),
   openLogs: () => ipcRenderer.invoke('gvision:open-logs'),
   update: () => ipcRenderer.invoke('gvision:update'),
+  onExchange: (cb) => ipcRenderer.on('gvision:exchange', (_e, entry) => cb(entry)),
+  getLog: () => ipcRenderer.invoke('gvision:get-log'),
+  clearLog: () => ipcRenderer.invoke('gvision:clear-log'),
+  getSettings: () => ipcRenderer.invoke('gvision:get-settings'),
+  saveSettings: (changes) => ipcRenderer.invoke('gvision:save-settings', changes),
 });

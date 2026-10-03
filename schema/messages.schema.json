@@ -287,6 +287,96 @@
       "title": "DimMsg",
       "type": "object"
     },
+    "ExchangeMsg": {
+      "additionalProperties": false,
+      "description": "One question and its answer, for the panel's conversation log.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "exchange",
+          "default": "exchange",
+          "title": "Type",
+          "type": "string"
+        },
+        "exchange_id": {
+          "title": "Exchange Id",
+          "type": "string"
+        },
+        "asked_ts": {
+          "title": "Asked Ts",
+          "type": "number"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "answer": {
+          "title": "Answer",
+          "type": "string"
+        },
+        "via": {
+          "default": "voice",
+          "enum": [
+            "voice",
+            "typed"
+          ],
+          "title": "Via",
+          "type": "string"
+        },
+        "tools": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "latency_ms": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "default": {},
+          "title": "Latency Ms",
+          "type": "object"
+        },
+        "screenshot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Screenshot"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "exchange_id",
+        "asked_ts",
+        "question",
+        "answer",
+        "via",
+        "tools",
+        "latency_ms",
+        "screenshot"
+      ],
+      "title": "ExchangeMsg",
+      "type": "object"
+    },
     "FocusMsg": {
       "additionalProperties": false,
       "description": "Move the spotlight to these elements.",
@@ -777,6 +867,7 @@
       "clear": "#/$defs/ClearMsg",
       "config_changed": "#/$defs/ConfigChangedMsg",
       "dim": "#/$defs/DimMsg",
+      "exchange": "#/$defs/ExchangeMsg",
       "focus": "#/$defs/FocusMsg",
       "highlight": "#/$defs/HighlightMsg",
       "objects": "#/$defs/ObjectsMsg",
@@ -816,6 +907,9 @@
     },
     {
       "$ref": "#/$defs/VoiceMsg"
+    },
+    {
+      "$ref": "#/$defs/ExchangeMsg"
     },
     {
       "$ref": "#/$defs/ClearMsg"

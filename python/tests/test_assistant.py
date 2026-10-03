@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import numpy as np
 
@@ -7,7 +8,8 @@ from gvision.agent.qwen import Reply
 from gvision.assistant import Assistant
 from gvision.perception.detector import Detection
 from gvision.perception.live import LivePipeline, LiveSettings
-from gvision.protocol import ClearMsg, DimMsg, FocusMsg, HighlightMsg, ObjectsMsg, dump, parse
+from gvision.protocol import ClearMsg, DimMsg, ExchangeMsg, FocusMsg, HighlightMsg, ObjectsMsg, dump, parse
+from gvision.snapshot import LatestFrame
 from gvision.world import WorldState
 from test_agent import FakeQwen, tool_reply
 from test_live import FakeBridge
@@ -95,6 +97,47 @@ def test_spoken_request_end_to_end():
     # Only the cow reaches the overlay, although YOLOE also tracks the person.
     labels = {o.label for m in sent if isinstance(m, ObjectsMsg) for o in m.objects}
     assert labels == {"cow"}
+
+
+def test_each_answer_goes_to_the_conversation_log_with_the_screen():
+    async def run():
+        world = WorldState()
+        bridge = FakeBridge()
+        screen = LatestFrame()
+        screen.offer(FakeSource().latest())
+        qwen = FakeQwen(tool_reply("set_watch", targets=["cow"]), Reply("The cow is on your left."))
+        encoded = []
+
+        def encode(image):
+            encoded.append(image.shape)
+            return "data:image/jpeg;base64,AAAA"
+
+        assistant = Assistant(bridge, world, Agent(qwen, world), screen=screen, encode_fn=encode)
+        before = time.time()
+        await assistant.submit("where's the cow")
+        await asyncio.sleep(0.05)
+        return bridge.sent, encoded, before
+
+    sent, encoded, before = asyncio.run(run())
+    (ex,) = [m for m in sent if isinstance(m, ExchangeMsg)]
+    assert ex.question == "where's the cow" and ex.answer == "The cow is on your left."
+    assert ex.via == "typed" and ex.tools == ["set_watch"] and "llm_tool_call" in ex.latency_ms
+    assert ex.screenshot == "data:image/jpeg;base64,AAAA" and encoded == [(4, 4, 3)]
+    assert before <= ex.asked_ts <= ex.ts
+    assert parse(dump(ex)) == ex
+
+
+def test_conversation_log_without_a_screen():
+    async def run():
+        bridge = FakeBridge()
+        world = WorldState()
+        assistant = Assistant(bridge, world, Agent(FakeQwen(Reply("Hello.")), world))
+        await assistant.ask("hi")
+        await asyncio.sleep(0.01)
+        return bridge.sent
+
+    (ex,) = [m for m in asyncio.run(run()) if isinstance(m, ExchangeMsg)]
+    assert ex.answer == "Hello." and ex.screenshot is None and ex.tools == []
 
 
 def test_dismiss_cancels_and_clears_watches():

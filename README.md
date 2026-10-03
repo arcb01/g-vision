@@ -45,8 +45,10 @@ python/            Perception, agent and audio processes (package: gvision)
 app/               Electron app: transparent overlay + control panel
   main.js          Owns the bridge connection, validates and forwards messages
   services.js      Starts and stops llama-server and the Python backend
+  settings.js      The panel's Settings tab: saved in gvision.config.json, passed as backend flags
+  conversation.js  The panel's Log tab: questions, answers and screenshots in logs/conversation/
   src/overlay.*    PixiJS overlay: outlines, semantic colors, spotlight dimming
-  src/panel.*      Control panel shell: dashboard, answer, controls
+  src/panel.*      Control panel: Home, Log and Settings tabs
 G-VISION.bat       Double-click launcher (Windows)
 gvision.config.example.json  Launcher paths; copy to gvision.config.json
 schema/
@@ -99,7 +101,7 @@ version you have. **Update and restart** in the control panel does the same
 without closing anything by hand. From Git Bash, `cd app && npm start` starts
 the app without updating. The app starts Qwen in llama-server and
 the Python backend (`python -m gvision --live --agent`) on its own, shows each
-one's state in the control panel under **Startup** (with Start/Restart and Stop
+one's state on the control panel's **Home** tab (with Start/Restart and Stop
 buttons and the last error if one fails), and stops both when you close the
 panel. Restart re-reads `gvision.config.json`, so a fixed path applies without
 relaunching. Their output goes to `logs/qwen.log` and `logs/backend.log`
@@ -114,7 +116,22 @@ defaults expect the llama.cpp folder at `~/Desktop/coding projects/G-vision-lab`
 among the active one (`$VIRTUAL_ENV`), `python/.venv` and `.venv` at the
 repository root. To change them, copy `gvision.config.example.json` to
 `gvision.config.json` and edit it; `python.exe` points at a specific Python (relative to `python/`), `python.args` sets the backend's options,
-e.g. `["--live", "--agent", "--prompts", "person,cow", "--whisper-model", "small"]`.
+e.g. `["--live", "--agent", "--prompts", "person,cow"]`.
+
+The control panel has three tabs:
+
+- **Home**: what G-VISION is doing now (listening, thinking, speaking, what was
+  heard and the answer), the services, performance and the latest questions.
+- **Log**: every question as a conversation, newest first, with the time, a
+  screenshot of the screen when it was asked (click it to enlarge), what was
+  heard, the answer and the tools used. It is kept in `logs/conversation/`
+  across restarts (the newest 500 questions) and can be searched or cleared.
+- **Settings**: push-to-talk key, speech-to-text model, voice, whether to speak
+  answers, read on-screen text, scene memory and how often to write situation
+  notes, and the dim strength. They are saved in the `settings` section of
+  `gvision.config.json`. The dim strength applies at once; the rest when the
+  backend restarts (the tab offers a **Restart backend** button). A flag
+  written by hand in `python.args` wins over the same setting.
 
 Other ways to start: `G-VISION.bat --demo` (or `npm start -- --demo`) runs the
 synthetic demo without Qwen, and `npm start -- --no-services` only opens the

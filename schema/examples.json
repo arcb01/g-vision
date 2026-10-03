@@ -21,6 +21,10 @@
   {"v": 1, "ts": 1759500005.0, "type": "status", "perception_fps": 60.0, "game_fps": 144.0, "vram_used_mb": 5120.0,
    "latency_ms": {"detector": 12.5}, "components": {"capture": "running", "detector": "running"}},
   {"v": 1, "ts": 1759500005.5, "type": "voice", "state": "listening", "transcript": null, "level": 0.42},
+  {"v": 1, "ts": 1759500005.8, "type": "exchange", "exchange_id": "a1", "asked_ts": 1759500004.1,
+   "question": "where is the creeper?", "answer": "The creeper is on your left, highlighted.", "via": "voice",
+   "tools": ["set_watch"], "latency_ms": {"llm_tool_call": 412.0, "tools": 1.5, "llm_answer": 288.0},
+   "screenshot": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ=="},
   {"v": 1, "ts": 1759500006.0, "type": "clear", "reason": "dismiss hotkey"},
   {"v": 1, "ts": 1759500007.0, "type": "config_changed", "changes": {"visual_effects.dim_strength": 0.4}}
 ]

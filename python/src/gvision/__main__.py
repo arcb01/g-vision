@@ -67,9 +67,12 @@ async def _live(args: argparse.Namespace, bridge: Bridge, stop: asyncio.Event) -
         show_all=args.show_all or not args.agent,
     )
     log.info("live: detecting %s at %.0f Hz, glowing %s", prompts, args.rate, watch or "nothing")
-    world = memory = None
+    world = memory = screen = None
     jobs = []
     if args.agent:
+        from gvision.snapshot import LatestFrame
+
+        screen = LatestFrame()
         from gvision.world import WorldState
 
         world = WorldState()
@@ -83,8 +86,10 @@ async def _live(args: argparse.Namespace, bridge: Bridge, stop: asyncio.Event) -
             events = EventLog(world)
             history.listeners.append(lambda f: events.update(f.ts))
             memory = (history, events)
-        jobs.append(_agent(args, bridge, world, stop, text, memory))
+        jobs.append(_agent(args, bridge, world, stop, text, memory, screen))
     pipeline = LivePipeline(bridge, source, detector, settings, world=world)
+    if screen:
+        pipeline.frame_listeners.append(screen.offer)
     if memory:
         pipeline.frame_listeners.append(memory[0].offer)
     await asyncio.gather(pipeline.run(stop), *jobs)
@@ -106,7 +111,8 @@ async def _text_watcher(args: argparse.Namespace, bridge: Bridge, source):
     return TextWatcher(bridge, source, engine, profiles_dir=args.text_profiles)
 
 
-async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.Event, text=None, memory=None) -> None:
+async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.Event, text=None, memory=None,
+                 screen=None) -> None:
     from gvision.agent.agent import Agent
     from gvision.agent.qwen import QwenClient
     from gvision.agent.tools import ToolExecutor
@@ -138,7 +144,8 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
 
         asr = await asyncio.to_thread(load_asr, args.asr, args.asr_device, args.whisper_model)
         recorder = Recorder()
-    assistant = Assistant(bridge, world, Agent(qwen, world, tools), asr=asr, tts=tts, recorder=recorder)
+    assistant = Assistant(bridge, world, Agent(qwen, world, tools), asr=asr, tts=tts, recorder=recorder,
+                          screen=screen)
     try:
         if args.no_mic:
             await assistant.read_stdin(stop)

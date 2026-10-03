@@ -3,6 +3,8 @@
 Hold push-to-talk -> record -> speech-to-text -> Qwen with tools ->
 highlight -> answer in the panel, spotlight on what was found, and Kokoro
 speaks it. A new push-to-talk or the dismiss hotkey cancels everything.
+Every answered question also goes to the panel's conversation log, with
+what was on screen when it was asked.
 """
 
 from __future__ import annotations
@@ -26,11 +28,13 @@ from gvision.protocol import (
     AnswerFinishedMsg,
     AnswerMsg,
     ClearMsg,
+    ExchangeMsg,
     Message,
     Segment,
     SegmentStartedMsg,
     VoiceMsg,
 )
+from gvision.snapshot import Encode, LatestFrame, encode
 from gvision.world import WorldState
 
 log = logging.getLogger(__name__)
@@ -46,6 +50,7 @@ class Assistant:
     def __init__(
         self, bridge: Bridge, world: WorldState, agent: Agent,
         asr: SpeechToText | None = None, tts: KokoroTTS | None = None, recorder: Recorder | None = None,
+        screen: LatestFrame | None = None, encode_fn: Encode = encode,
     ) -> None:
         self.bridge = bridge
         self.world = world
@@ -53,6 +58,11 @@ class Assistant:
         self.asr = asr
         self.tts = tts
         self.recorder = recorder
+        self.screen = screen
+        self._encode = encode_fn
+        self._asked: tuple[float, str, object] | None = None
+        """(time, "voice" or "typed", screen image) of the question being answered."""
+        self._logging: set[asyncio.Task] = set()
         self._task: asyncio.Task | None = None
         self._meter: asyncio.Task | None = None
         self._ids = itertools.count(1)
@@ -94,6 +104,7 @@ class Assistant:
         if self._meter:
             self._meter.cancel()
         audio = self.recorder.stop()
+        self._remember_question("voice")
         self._task = asyncio.create_task(self._from_audio(audio))
 
     async def _from_audio(self, audio) -> None:
@@ -114,6 +125,7 @@ class Assistant:
     def submit(self, text: str) -> asyncio.Task:
         """Typed request: same path as speech, minus the microphone."""
         self.ptt_down()
+        self._remember_question("typed")
         self._task = asyncio.create_task(self.ask(text))
         return self._task
 
@@ -126,8 +138,35 @@ class Assistant:
             answer = Answer("I can't reach the language model right now.")
         log.info("answer %r refs=%s tools=%s latency=%s", answer.text, answer.refs, answer.tool_calls,
                  {k: round(v) for k, v in answer.latency_ms.items()})
+        self._log_exchange(text, answer)
         await self.present(answer)
         return answer
+
+    # --- conversation log ----------------------------------------------------
+
+    def _remember_question(self, via: str) -> None:
+        self._asked = (time.time(), via, self.screen.grab() if self.screen else None)
+
+    def _log_exchange(self, question: str, answer: Answer) -> None:
+        asked_ts, via, image = self._asked or (time.time(), "typed", None)
+        self._asked = None
+        exchange_id = f"x{int(asked_ts * 1000)}"
+        task = asyncio.create_task(self._send_exchange(exchange_id, asked_ts, via, image, question, answer))
+        self._logging.add(task)  # keep a reference until it is sent
+        task.add_done_callback(self._logging.discard)
+
+    async def _send_exchange(self, exchange_id, asked_ts, via, image, question: str, answer: Answer) -> None:
+        screenshot = None
+        if image is not None:
+            try:
+                screenshot = await asyncio.to_thread(self._encode, image)
+            except Exception as e:  # never lose the entry over its picture
+                log.warning("conversation log: no screenshot: %s", e)
+        self.bridge.send(ExchangeMsg(
+            exchange_id=exchange_id, asked_ts=asked_ts, question=question, answer=answer.text, via=via,
+            tools=answer.tool_calls, latency_ms={k: round(v, 1) for k, v in answer.latency_ms.items()},
+            screenshot=screenshot,
+        ))
 
     async def present(self, answer: Answer) -> None:
         # Glow and spotlight are the live pipeline's job: they stay on for as
