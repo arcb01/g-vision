@@ -16,6 +16,18 @@ const { REPO_ROOT, loadConfig } = require('./services');
 const IS_WIN = process.platform === 'win32';
 const DEFAULT_EXTRAS = 'dev,perception,voice';
 
+// onnxruntime and onnxruntime-gpu install the same module, and whichever
+// pip wrote last wins. Kokoro needs the GPU build, so after an install put
+// it back on top if the CPU build replaced it.
+const HAS_CUDA = "import onnxruntime as o, sys; sys.exit(0 if 'CUDAExecutionProvider' in o.get_available_providers() else 1)";
+
+function ensureGpuOnnxruntime(python, run, say) {
+  if (run(python, ['-c', HAS_CUDA], null).ok) return;
+  say('Putting the GPU build of onnxruntime back on top (for the voice)...');
+  const r = run(python, ['-m', 'pip', 'install', '--force-reinstall', '--no-deps', 'onnxruntime-gpu'], null, { live: true });
+  if (!r.ok) say('Could not reinstall onnxruntime-gpu; the voice will run on the CPU.');
+}
+
 function fileHash(file) {
   try {
     return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -45,7 +57,9 @@ function defaultRun(cmd, args, cwd, { live = false } = {}) {
 }
 
 // Returns { pulled, updated, installed: [...], messages: [...] }.
-function runUpdate({ repoRoot = REPO_ROOT, run = defaultRun, log = console.log, python = null, extras = DEFAULT_EXTRAS } = {}) {
+function runUpdate({
+  repoRoot = REPO_ROOT, run = defaultRun, log = console.log, python = null, extras = DEFAULT_EXTRAS, gpu = IS_WIN,
+} = {}) {
   const result = { pulled: false, updated: false, installed: [], messages: [] };
   const say = (m) => {
     result.messages.push(m);
@@ -111,6 +125,7 @@ function runUpdate({ repoRoot = REPO_ROOT, run = defaultRun, log = console.log, 
       say(`Could not install ${dep.label} (will retry next launch): ${why.split('\n').slice(-3).join(' ')}`);
     }
   }
+  if (gpu && python && result.installed.includes('python')) ensureGpuOnnxruntime(python, run, say);
   fs.mkdirSync(path.dirname(stateFile), { recursive: true });
   fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
   return result;

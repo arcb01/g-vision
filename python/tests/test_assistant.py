@@ -261,3 +261,93 @@ def test_voice_levels():
     assert 0.3 < loudness(np.full(100, 0.1, np.float32)) < 1.0
     tone = np.sin(np.linspace(0, 400, 24000)).astype(np.float32) * 0.2
     assert len(envelope(tone, 24000, 20)) == 20
+
+
+def test_split_sentences():
+    from gvision.audio.tts import split_sentences
+
+    assert split_sentences("Hi!") == ["Hi!"]
+    assert split_sentences("The cow is left. A skeleton is behind you!  Run.") == [
+        "The cow is left.", "A skeleton is behind you! Run."]
+    assert split_sentences("Yes. The sign says danger.") == ["Yes. The sign says danger."]  # too short alone
+    assert split_sentences("Version 1.2 is out.") == ["Version 1.2 is out."]
+
+
+class TimedTTS(FakeTTS):
+    """Records the order of synthesis and playback; 0.1 s of audio per sentence."""
+    device = "GPU"
+
+    def __init__(self):
+        self.events = []
+        self.stopped = False
+
+    def start(self):
+        self.stopped = False
+
+    def synthesize(self, text):
+        self.events.append(("synth", text))
+        return np.zeros(2400, np.float32), 24000
+
+    def play(self, samples, rate):
+        self.events.append(("play", len(samples)))
+        time.sleep(len(samples) / rate)
+
+    def stop(self):
+        self.stopped = True
+
+
+class FakeText:
+    def __init__(self):
+        self.lit = []
+
+    def show(self, refs):
+        pass
+
+    def light(self, ref, segment_id=0):
+        self.lit.append(ref)
+
+
+def test_voice_starts_after_the_first_sentence():
+    tts = TimedTTS()
+    text = FakeText()
+
+    async def run():
+        bridge = FakeBridge()
+        world = WorldState()
+        agent = Agent(FakeQwen(Reply("x")), world)
+        agent.tools.text = text
+        assistant = Assistant(bridge, world, agent, tts=tts)
+        steps = []
+        answer = Answer("The sign says danger ahead. Your quest is to find the lighthouse.",
+                        text_cues=[(0.0, "text:1"), (0.6, "text:2")])
+        await assistant.present(answer, steps.extend)
+        return steps
+
+    steps = asyncio.run(run())
+    # The first sentence plays before the second is needed; both are spoken.
+    assert tts.events[0] == ("synth", "The sign says danger ahead.")
+    assert [e for e in tts.events if e[0] == "play"] == [("play", 2400), ("play", 2400)]
+    assert tts.events.index(("play", 2400)) < len(tts.events) - 1
+    assert steps[0].title == "Voice: Kokoro af_heart on GPU"
+    assert steps[0].detail == "first of 2 sentences: 0.1 s of speech"
+    assert text.lit == ["text:1", "text:2"]  # each lit with its own sentence
+
+
+def test_stop_skips_the_rest_of_the_answer():
+    tts = TimedTTS()
+    played = []
+
+    def play(samples, rate):
+        played.append(len(samples))
+        tts.stop()  # dismissed during the first sentence
+
+    tts.play = play
+
+    async def run():
+        bridge = FakeBridge()
+        world = WorldState()
+        assistant = Assistant(bridge, world, Agent(FakeQwen(Reply("x")), world), tts=tts)
+        await assistant.present(Answer("First sentence here. Second sentence here. Third one too."))
+
+    asyncio.run(run())
+    assert played == [2400]

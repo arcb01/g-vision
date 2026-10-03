@@ -137,7 +137,7 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
     if not args.no_tts:
         from gvision.audio.tts import KokoroTTS
 
-        tts = await asyncio.to_thread(KokoroTTS, args.voice)
+        tts = await asyncio.to_thread(KokoroTTS, args.voice, device=args.tts_device)
     if not args.no_mic:
         from gvision.audio.asr import load_asr
         from gvision.audio.mic import Recorder
@@ -191,6 +191,8 @@ def main() -> None:
     agent.add_argument("--whisper-model", default="medium", help="faster-whisper size: small, medium...")
     agent.add_argument("--asr-device", default="cuda", help="device for speech-to-text")
     agent.add_argument("--voice", default="af_heart", help="Kokoro voice")
+    agent.add_argument("--tts-device", choices=["cuda", "cpu"], default="cuda",
+                       help="where Kokoro runs (falls back to the CPU without onnxruntime-gpu)")
     agent.add_argument("--no-mic", action="store_true", help="type requests in the terminal instead of speaking")
     agent.add_argument("--no-tts", action="store_true", help="show answers without speaking them")
     agent.add_argument("--no-text", action="store_true", help="don't read on-screen text")
