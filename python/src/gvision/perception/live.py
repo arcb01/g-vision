@@ -1,9 +1,10 @@
 """First live pipeline: capture -> YOLOE -> ByteTrack -> overlay (plan step 3).
 
 Streams tracked objects to the app and gives every confirmed track whose
-label is in the watch list a gold "target" glow, standing in for the
-``set_watch`` tool Qwen will call later. With ``spotlight`` on, the screen
-also dims around the watched objects.
+label is in the watch list a gold "target" glow. With a ``WorldState``,
+the watch list also follows the agent's ``set_watch`` calls, and new watch
+targets are added to YOLOE's text prompts on the fly. With ``spotlight`` on,
+the screen also dims around the watched objects.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from gvision.perception.detector import Detection
 from gvision.perception.tracker import ByteTracker, Track
 from gvision.protocol import (
     Box,
+    ColorRole,
     ClearMsg,
     DimMsg,
     FocusMsg,
@@ -32,6 +34,7 @@ from gvision.protocol import (
     StatusMsg,
     TrackedObject,
 )
+from gvision.world import WorldState
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +42,11 @@ log = logging.getLogger(__name__)
 class Detector(Protocol):
     """Anything with YoloeDetector's ``detect``; lets tests fake it."""
 
+    classes: list[str]
+
     def detect(self, image: np.ndarray) -> list[Detection]: ...
+
+    def set_classes(self, classes: list[str]) -> None: ...
 
 
 @dataclass
@@ -66,13 +73,16 @@ def to_message(tr: Track) -> TrackedObject:
 class LivePipeline:
     def __init__(
         self, bridge: Bridge, source: FrameSource, detector: Detector, settings: LiveSettings,
-        tracker: ByteTracker | None = None,
+        tracker: ByteTracker | None = None, world: WorldState | None = None,
     ) -> None:
         self.bridge = bridge
         self.source = source
         self.detector = detector
         self.tracker = tracker or ByteTracker()
         self.settings = settings
+        self.world = world
+        self.base_prompts = list(getattr(detector, "classes", []) or [])
+        self._watch_version = world.watch_version if world else 0
         self.dismissed: set[str] = set()
         self._latency: dict[str, deque[float]] = {k: deque(maxlen=30) for k in ("capture", "detector", "tracker")}
         self._frame_times: deque[float] = deque(maxlen=30)
@@ -85,10 +95,22 @@ class LivePipeline:
             self.dismissed |= {tr.ref for tr in self.tracker.tracks}
             self._dimmed = False
 
+    def watch_roles(self) -> dict[str, ColorRole]:
+        """Label -> glow color for everything currently watched."""
+        roles: dict[str, ColorRole] = {label: "target" for label in self.settings.watch}
+        if self.world:
+            roles.update({w.target: w.color_role for w in self.world.watches.values()})
+        return roles
+
+    def prompts(self) -> list[str]:
+        """YOLOE prompts: the startup ones plus every watched target."""
+        return self.base_prompts + [t for t in self.watch_roles() if t not in self.base_prompts]
+
     def watched(self, tracks: list[Track]) -> list[Track]:
+        roles = self.watch_roles()
         return [
             tr for tr in tracks
-            if tr.status == "confirmed" and tr.label in self.settings.watch and tr.ref not in self.dismissed
+            if tr.status == "confirmed" and tr.label in roles and tr.ref not in self.dismissed
         ]
 
     def step(self, frame_ts: float, detections: list[Detection]) -> list[Message]:
@@ -98,11 +120,22 @@ class LivePipeline:
         self._latency["tracker"].append((time.perf_counter() - t0) * 1000)
         live_refs = {tr.ref for tr in tracks}
         self.dismissed &= live_refs
-        out: list[Message] = [ObjectsMsg(frame_ts=frame_ts, objects=[to_message(tr) for tr in tracks])]
+        objects = [to_message(tr) for tr in tracks]
+        out: list[Message] = []
+        if self.world:
+            self.world.set_objects(frame_ts, objects)
+            if self.world.watch_version != self._watch_version:
+                # A new request replaces the old glows: the overlay only drops
+                # highlights on clear, so clear first and resend what remains.
+                self._watch_version = self.world.watch_version
+                self.dismissed.clear()
+                out.append(ClearMsg(reason="watches changed"))
+        out.append(ObjectsMsg(frame_ts=frame_ts, objects=objects))
         targets = self.watched(tracks)
+        roles = self.watch_roles()
         # Highlights, focus and dim are idempotent in the overlay, so they are
         # resent every step: an app that connects late still gets them.
-        out += [HighlightMsg(ref=tr.ref, color_role="target") for tr in targets]
+        out += [HighlightMsg(ref=tr.ref, color_role=roles[tr.label]) for tr in targets]
         if self.settings.spotlight:
             if targets:
                 out.append(FocusMsg(refs=[tr.ref for tr in targets]))
@@ -136,6 +169,10 @@ class LivePipeline:
             if frame is None:
                 await asyncio.sleep(period)
                 continue
+            prompts = self.prompts()
+            if prompts != list(self.detector.classes):
+                log.info("YOLOE prompts: %s", ", ".join(prompts))
+                await asyncio.to_thread(self.detector.set_classes, prompts)
             t0 = time.perf_counter()
             detections = await asyncio.to_thread(self.detector.detect, frame.image)
             self._latency["detector"].append((time.perf_counter() - t0) * 1000)

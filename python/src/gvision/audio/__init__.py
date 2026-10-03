@@ -1,6 +1,6 @@
 """Audio process (plan sections 9.1 and 9.3).
 
-Will contain: push-to-talk capture, Nemotron streaming ASR (Whisper
-fallback) and Kokoro TTS on CPU, emitting ``segment_started`` and
-``answer_finished``. Not implemented yet.
+Push-to-talk recording, speech-to-text (faster-whisper by default, Nemotron
+as an option) and Kokoro text-to-speech on the CPU. Heavy libraries are
+imported lazily so the package works without them.
 """

@@ -5,9 +5,10 @@ finds and highlights objects, reads on-screen text, remembers recent events and
 answers spoken questions with voice and visual highlights.
 
 The full design is in [game-vision-agent-plan.md](game-vision-agent-plan.md).
-This repository is at build step 3 of the plan: the screen is captured,
-YOLOE finds objects from text prompts, ByteTrack tracks them, and the overlay
-glows around the ones you ask for. A demo mode also streams synthetic objects
+This repository is at build step 5 of the plan, "find X": hold a key, ask
+"where's the cow?", and Qwen3.5-2B turns the question into a `set_watch`
+call, YOLOE starts looking for cows, the overlay glows around the one it
+tracks and Kokoro says where it is. A demo mode also streams synthetic objects
 and a scripted answer so the overlay can be worked on without a GPU.
 
 ## Layout
@@ -24,8 +25,17 @@ python/            Perception, agent and audio processes (package: gvision)
       tracker.py   ByteTrack with tentative / confirmed / lost life cycle
       live.py      capture -> detect -> track -> overlay messages
       exclusion_check.py  proves the overlay is not in captured frames
-    agent/         Snapshot builder, Qwen client, tools, narrator (todo)
-    audio/         Push-to-talk, Nemotron ASR, Kokoro TTS (todo)
+    world.py       World state: tracked objects + active watches, snapshot for Qwen
+    assistant.py   Push-to-talk -> speech-to-text -> agent -> panel, spotlight, voice
+    agent/
+      qwen.py      Client for Qwen3.5-2B in llama-server (OpenAI-compatible API)
+      tools.py     set_watch, clear_watch, query_state (with routing hints)
+      agent.py     One request: snapshot + tools -> tool results -> short answer
+    audio/
+      ptt.py       Global push-to-talk key (pynput)
+      mic.py       Microphone recording while the key is held
+      asr.py       faster-whisper (default) or Nemotron speech-to-text
+      tts.py       Kokoro-82M on the CPU (ONNX Runtime)
 app/               Electron app: transparent overlay + control panel
   main.js          Owns the bridge connection, validates and forwards messages
   src/overlay.*    PixiJS overlay: outlines, semantic colors, spotlight dimming
@@ -85,6 +95,53 @@ around them. `Ctrl+Shift+X` dismisses the current glows. Useful options:
 slower), `--source clip.mp4` (replay a recording instead of the screen),
 `--device cpu`. Games must run in borderless windowed mode.
 
+## Find X with your voice (Windows)
+
+Three things run side by side: the app, Qwen in llama.cpp's server, and the
+Python process.
+
+1. Install the voice extras (after the CUDA torch and perception extras above):
+
+   ```bash
+   cd python
+   pip install -e ".[dev,perception,voice]"
+   ```
+
+   This pulls faster-whisper, Kokoro (ONNX), sounddevice, pynput and the CUDA
+   12 cuBLAS/cuDNN wheels that faster-whisper needs on Windows.
+
+2. Start Qwen3.5-2B (any llama.cpp build with `--jinja`; tested with b11379):
+
+   ```bash
+   llama-server -m Qwen3.5-2B-Q4_K_M.gguf --mmproj mmproj-F16.gguf -ngl 99 -c 8192 --jinja --reasoning off --port 8080
+   ```
+
+3. Start the app (`npm start` in `app/`), then:
+
+   ```bash
+   python -m gvision --live --agent --prompts person
+   ```
+
+Hold **F8**, ask "where's the cow?" and let go. The panel shows what was
+heard; Qwen calls `set_watch(["cow"])`, "cow" is added to YOLOE's prompts,
+and once the tracker confirms one it glows gold, the screen dims around it
+and Kokoro answers ("The cow is on your left."). If nothing turns up within
+1.5 s the answer says so and the watch stays on, so the glow appears as soon
+as one comes into view. Each new push-to-talk replaces the previous watch;
+`Ctrl+Shift+X` clears everything and stops speech. Ask "how many people are
+there?" for a count, or "stop highlighting" to clear.
+
+Useful options: `--ptt-key caps_lock`, `--whisper-model small` (faster, less
+VRAM), `--asr nemotron` (needs `transformers`; much worse on accented English
+in our tests), `--voice am_michael`, `--no-mic` (type requests in the
+terminal), `--no-tts`, `--qwen-url`. The first run downloads the Whisper
+weights to the Hugging Face cache and Kokoro (~120 MB) into
+`python/models/kokoro/`.
+
+YOLOE's text prompts work on realistic graphics. On blocky or stylized games
+(Minecraft) they find little or nothing yet; visual exemplars and Qwen's
+"locate it in the frame" fallback (plan 5.3 and 9.4) are what fix that.
+
 ### Check that the overlay is excluded from capture
 
 The detector must never see the overlay's own glows. With the app running and
@@ -124,8 +181,8 @@ highlights and dimming. The app reconnects on its own if the bridge restarts.
 
 Python and Electron exchange JSON messages over `ws://127.0.0.1:8765`
 (plan section 12): `objects`, `highlight`, `focus`, `dim`, `answer`,
-`segment_started`, `answer_finished`, `badges`, `clear`, `status` and
-`config_changed`. Every message carries `v` (protocol version), `type` and
+`segment_started`, `answer_finished`, `badges`, `status`, `voice`, `clear`
+and `config_changed`. Every message carries `v` (protocol version), `type` and
 `ts`; coordinates are normalized to 0..1; elements are addressed by reference
 IDs such as `obj:22`, `text:7` or `region:top_right`.
 

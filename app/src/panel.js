@@ -1,4 +1,4 @@
-// Control panel shell: connection state, dashboard metrics, the current
+// Control panel shell: connection state, dashboard metrics, push-to-talk state, the current
 // answer (karaoke-style segment highlight) and a couple of controls.
 'use strict';
 
@@ -55,6 +55,15 @@ function renderAnswer(activeSegment) {
   );
 }
 
+// Push-to-talk state and what speech-to-text heard, to spot ASR mistakes.
+function renderVoice({ state, transcript }) {
+  const pill = document.getElementById('voice-state');
+  pill.textContent = state;
+  pill.className = `pill ${state}`;
+  if (state === 'listening') document.getElementById('heard').textContent = '';
+  if (transcript != null) document.getElementById('heard').textContent = transcript ? `"${transcript}"` : '(nothing heard)';
+}
+
 window.gvision.onConnection(setConnection);
 window.gvision.getConnection().then(setConnection);
 
@@ -73,6 +82,9 @@ window.gvision.onMessage((m) => {
       break;
     case 'answer_finished':
       renderAnswer(null);
+      break;
+    case 'voice':
+      renderVoice(m);
       break;
     default:
       break;
