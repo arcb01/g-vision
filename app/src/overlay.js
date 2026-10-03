@@ -22,6 +22,9 @@ const VOICE_BARS = 28;
 const VOICE_FADE_MS = 180;
 const VOICE_PILL = { w: 300, h: 64, bottom: 0.1 }; // bottom: share of screen height
 const FILL_ALPHA = 0.22; // see-through tint inside highlighted contours
+// Highlights not being talked about right now (the spotlight is on and they are
+// not in focus): a faint outline under the dimming, lit once the voice reaches them.
+const UNLIT_ALPHA = 0.3;
 
 const state = {
   objects: { frameTs: 0, list: [] },
@@ -80,6 +83,11 @@ function extrapolated(obj, nowS) {
     box: { x: obj.box.x + dx, y: obj.box.y + dy, w: obj.box.w, h: obj.box.h },
     outline: obj.outline ? obj.outline.map(([x, y]) => [x + dx, y + dy]) : null,
   };
+}
+
+// Glowing now: focused, or everything highlighted when there is no spotlight.
+function lit(ref) {
+  return state.focus.has(ref) || (state.focus.size === 0 && !state.dim.on);
 }
 
 // Everything that can be drawn this frame: tracked objects, plus highlighted
@@ -176,11 +184,13 @@ async function main() {
       const fade = lost ? LOST_ALPHA : 1;
 
       let alpha = 0.25 * fade; // unhighlighted debug track
-      if (hl) {
-        alpha = (focused || state.focus.size === 0 ? 1 : 0.7) * fade;
+      if (hl && lit(ref)) {
+        alpha = fade;
         const glowAlpha = (focused ? pulse : 0.5) * fade;
         shape(glowLayer, el).stroke({ width: GLOW_WIDTH_PX, color, alpha: glowAlpha, join: 'round' });
         shape(outlineLayer, el).fill({ color, alpha: FILL_ALPHA * (focused ? pulse : 0.7) * fade });
+      } else if (hl) {
+        alpha = UNLIT_ALPHA * fade; // waiting for the voice to reach it: no glow, no fill
       }
       const core = focused ? CORE_WIDTH_PX.focused : CORE_WIDTH_PX.mentioned;
       shape(outlineLayer, el).stroke({ width: core + 4, color: 0x000000, alpha: alpha * 0.7, join: 'round' });

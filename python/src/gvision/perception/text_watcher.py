@@ -515,8 +515,9 @@ class TextWatcher:
             if frame is not None:
                 await self.tick(frame, force=True)
 
-    def highlight(self, refs: list[str], color_role: ColorRole = "info", spotlight: bool = True) -> list[str]:
-        """Contour the blocks being talked about; returns the refs highlighted."""
+    def show(self, refs: list[str], color_role: ColorRole = "info") -> list[str]:
+        """Outline the blocks an answer will read, all unlit under the dimmed
+        screen; ``light`` then makes the one being read glow. Returns the refs shown."""
         blocks = [self.blocks[r] for r in refs if r in self.blocks]
         if not self.bridge or not blocks:
             return [b.ref for b in blocks]
@@ -524,10 +525,15 @@ class TextWatcher:
             p = HIGHLIGHT_PAD
             box = Box(x=b.box.x - p, y=b.box.y - p, w=b.box.w + 2 * p, h=b.box.h + 2 * p)
             self.bridge.send(HighlightMsg(ref=b.ref, color_role=color_role, box=box))
-        if spotlight:
-            self.bridge.send(FocusMsg(refs=[b.ref for b in blocks]))
-            self.bridge.send(DimMsg(on=True, strength=self.dim_strength))
+        self.bridge.send(FocusMsg(refs=[]))
+        self.bridge.send(DimMsg(on=True, strength=self.dim_strength))
         return [b.ref for b in blocks]
+
+    def light(self, ref: str, segment_id: int | None = None) -> None:
+        """Make the block being read aloud glow; the others stay dimmed."""
+        if self.bridge:
+            self.bridge.send(FocusMsg(refs=[ref], segment_id=segment_id))
+            self.bridge.send(DimMsg(on=True, strength=self.dim_strength))
 
     # --- background loop ---------------------------------------------------
 

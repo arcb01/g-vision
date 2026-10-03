@@ -49,6 +49,9 @@ class Answer:
     tool_calls: list[str] = field(default_factory=list)
     """Tool names called, for logs and tests."""
     latency_ms: dict[str, float] = field(default_factory=dict)
+    text_cues: list[tuple[float, str]] = field(default_factory=list)
+    """(where in the text it starts being read, 0..1; text block ref): the
+    block lights up when the voice reaches it."""
 
 
 def fallback_text(results: list[ToolResult]) -> str:
@@ -108,5 +111,6 @@ class Agent:
         final = await self.qwen.chat(messages, max_tokens=60)
         latency["llm_answer"] = (time.perf_counter() - t2) * 1000
         text = final.content or fallback_text(results)
-        refs += self.tools.highlight_text(text, results)
-        return Answer(text, refs, [c.name for c in reply.tool_calls], latency)
+        cues = self.tools.text_cues(text, results)
+        refs += [ref for _, ref in cues]
+        return Answer(text, refs, [c.name for c in reply.tool_calls], latency, cues)
