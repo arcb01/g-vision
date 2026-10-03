@@ -11,6 +11,9 @@
       h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; margin: 20px 0 8px; }
       .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; background: #8884; }
       .pill.ok { background: #2e9e5b; color: #fff; }
+      .pill.listening { background: #d9534f; color: #fff; }
+      .pill.thinking, .pill.speaking { background: #ffc83d; color: #000; }
+      #heard { font-style: italic; }
       table { border-collapse: collapse; font-size: 13px; }
       td { padding: 2px 16px 2px 0; }
       .segment { padding: 2px 4px; border-radius: 4px; }
@@ -24,6 +27,9 @@
 
     <h2>Dashboard</h2>
     <table id="status"><tr><td>No status yet</td></tr></table>
+
+    <h2>Voice</h2>
+    <p><span id="voice-state" class="pill">idle</span> <span id="heard"></span></p>
 
     <h2>Answer</h2>
     <p id="answer">No answer yet</p>

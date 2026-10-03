@@ -699,6 +699,59 @@
       ],
       "title": "TrackedObject",
       "type": "object"
+    },
+    "VoiceMsg": {
+      "additionalProperties": false,
+      "description": "Push-to-talk state for the panel: what was heard and what happens now.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "voice",
+          "default": "voice",
+          "title": "Type",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "listening",
+            "thinking",
+            "speaking",
+            "idle"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "transcript": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transcript"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "state",
+        "transcript"
+      ],
+      "title": "VoiceMsg",
+      "type": "object"
     }
   },
   "discriminator": {
@@ -713,7 +766,8 @@
       "highlight": "#/$defs/HighlightMsg",
       "objects": "#/$defs/ObjectsMsg",
       "segment_started": "#/$defs/SegmentStartedMsg",
-      "status": "#/$defs/StatusMsg"
+      "status": "#/$defs/StatusMsg",
+      "voice": "#/$defs/VoiceMsg"
     },
     "propertyName": "type"
   },
@@ -744,6 +798,9 @@
     },
     {
       "$ref": "#/$defs/StatusMsg"
+    },
+    {
+      "$ref": "#/$defs/VoiceMsg"
     },
     {
       "$ref": "#/$defs/ClearMsg"

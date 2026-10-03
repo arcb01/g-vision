@@ -113,14 +113,20 @@ class YoloeDetector:
             MODELS_DIR.mkdir(exist_ok=True)
             path = MODELS_DIR / model
         self.model = YOLOE(str(path))
-        self.classes = list(classes)
-        self.model.set_classes(self.classes)
+        self.classes: list[str] = []
+        self.set_classes(classes)
         self.conf = conf
         self.imgsz = imgsz
         self.device = device
         on_gpu = device.startswith("cuda") if device else torch.cuda.is_available()
         self.quantize = 16 if on_gpu else None  # fp16 on the GPU: faster, half the VRAM
         log.info("YOLOE %s ready, prompts: %s", path.name, ", ".join(self.classes))
+
+    def set_classes(self, classes: list[str]) -> None:
+        """Change the text prompts, e.g. when the agent starts a new watch.
+        Encodes the new prompts with YOLOE's text encoder (tens of ms)."""
+        self.model.set_classes(list(classes))
+        self.classes = list(classes)
 
     def detect(self, image: np.ndarray) -> list[Detection]:
         """Detect in one BGR frame. ``conf`` is low on purpose: the tracker

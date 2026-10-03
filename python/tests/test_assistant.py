@@ -1,0 +1,116 @@
+import asyncio
+
+import numpy as np
+
+from gvision.agent.agent import Agent, Answer
+from gvision.agent.qwen import Reply
+from gvision.assistant import Assistant
+from gvision.perception.detector import Detection
+from gvision.perception.live import LivePipeline, LiveSettings
+from gvision.protocol import ClearMsg, DimMsg, FocusMsg, HighlightMsg, dump, parse
+from gvision.world import WorldState
+from test_agent import FakeQwen, tool_reply
+from test_live import FakeBridge
+
+
+class FakeDetector:
+    """Only 'sees' the classes it is prompted with, like YOLOE."""
+
+    def __init__(self, classes):
+        self.classes = list(classes)
+        self.history = []
+
+    def set_classes(self, classes):
+        self.classes = list(classes)
+        self.history.append(list(classes))
+
+    def detect(self, image):
+        scene = {"cow": (0.1, 0.4, 0.2, 0.5), "person": (0.6, 0.1, 0.7, 0.4)}
+        return [Detection(box, 0.9, label) for label, box in scene.items() if label in self.classes]
+
+
+class FakeSource:
+    def __init__(self):
+        self.ts = 0.0
+
+    def latest(self):
+        self.ts += 0.1
+        return type("Frame", (), {"ts": self.ts, "image": np.zeros((4, 4, 3), np.uint8)})()
+
+    def close(self):
+        pass
+
+
+def test_pipeline_follows_world_watches():
+    world = WorldState()
+    bridge = FakeBridge()
+    det = FakeDetector(["person"])
+    pipe = LivePipeline(bridge, FakeSource(), det, LiveSettings(), world=world)
+    assert pipe.prompts() == ["person"]
+    world.set_watch("cow", "danger")
+    assert pipe.prompts() == ["person", "cow"]
+    out = []
+    for i in range(4):
+        out += pipe.step(i * 0.1, det.detect(None) + [Detection((0.1, 0.4, 0.2, 0.5), 0.9, "cow")])
+    assert isinstance(out[0], ClearMsg)  # the watch change clears old glows once
+    assert sum(isinstance(m, ClearMsg) for m in out) == 1
+    hl = [m for m in out if isinstance(m, HighlightMsg)]
+    assert hl and {m.color_role for m in hl} == {"danger"}
+    assert [o.label for o in world.confirmed()] == ["person", "cow"]
+    for m in out:
+        assert parse(dump(m)) == m
+
+
+def test_spoken_request_end_to_end():
+    """Typed request -> Qwen set_watch -> detector reprompted -> glow, spotlight, answer."""
+
+    async def run():
+        world = WorldState()
+        bridge = FakeBridge()
+        det = FakeDetector(["person"])
+        pipe = LivePipeline(bridge, FakeSource(), det, LiveSettings(rate_hz=50), world=world)
+        qwen = FakeQwen(tool_reply("set_watch", targets=["cow"]), Reply("The cow is on your left."))
+        assistant = Assistant(bridge, world, Agent(qwen, world), hold_s=0.05)
+        stop = asyncio.Event()
+        loop = asyncio.create_task(pipe.run(stop))
+        answer = await assistant.submit("where's the cow")
+        await asyncio.sleep(0.2)
+        stop.set()
+        await loop
+        return bridge.sent, det, answer
+
+    sent, det, answer = asyncio.run(run())
+    assert det.history == [["person", "cow"]]
+    assert answer.text == "The cow is on your left." and answer.refs
+    types = [m.type for m in sent]
+    assert "voice" in types and "answer" in types and "answer_finished" in types
+    cow_ref = answer.refs[0]
+    assert any(isinstance(m, HighlightMsg) and m.ref == cow_ref and m.color_role == "target" for m in sent)
+    assert any(isinstance(m, FocusMsg) and m.refs == [cow_ref] for m in sent)
+    dims = [m.on for m in sent if isinstance(m, DimMsg)]
+    assert dims[0] is True and dims[-1] is False  # spotlight lifts after the hold
+
+
+def test_dismiss_cancels_and_clears_watches():
+    async def run():
+        world = WorldState()
+        bridge = FakeBridge()
+
+        class SlowAgent:
+            async def handle(self, text):
+                await asyncio.sleep(10)
+                return Answer("late")
+
+        assistant = Assistant(bridge, world, SlowAgent())
+        world.set_watch("cow")
+        task = assistant.submit("find the pig")
+        world.set_watch("pig")
+        await asyncio.sleep(0.01)
+        for h in bridge.handlers:
+            await h(ClearMsg(reason="dismiss hotkey"))
+        await asyncio.sleep(0.01)
+        return task, world
+
+    task, world = asyncio.run(run())
+    assert task.cancelled()
+    assert not world.watches

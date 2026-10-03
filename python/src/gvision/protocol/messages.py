@@ -154,6 +154,15 @@ class StatusMsg(_Message):
     components: dict[str, Literal["running", "paused", "off", "error"]] = {}
 
 
+class VoiceMsg(_Message):
+    """Push-to-talk state for the panel: what was heard and what happens now."""
+
+    type: Literal["voice"] = "voice"
+    state: Literal["listening", "thinking", "speaking", "idle"]
+    transcript: str | None = None
+    """What speech-to-text heard, once the key is released."""
+
+
 # --- Either direction ------------------------------------------------------
 
 
@@ -185,6 +194,7 @@ Message = Annotated[
         AnswerFinishedMsg,
         BadgesMsg,
         StatusMsg,
+        VoiceMsg,
         ClearMsg,
         ConfigChangedMsg,
     ],

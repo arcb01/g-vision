@@ -2,6 +2,7 @@
 
     python -m gvision --demo                    synthetic objects and answers
     python -m gvision --live --watch person     capture + YOLOE + ByteTrack
+    python -m gvision --live --agent            + push-to-talk, Qwen, Kokoro: "find X"
     python -m gvision --check-exclusion         is the overlay kept out of capture?
 """
 
@@ -53,13 +54,55 @@ async def _live(args: argparse.Namespace, bridge: Bridge, stop: asyncio.Event) -
     from gvision.perception.live import LivePipeline, LiveSettings
 
     prompts = _split(args.prompts)
-    watch = _split(args.watch)
+    watch = _split(args.watch if args.watch is not None else ("" if args.agent else "person"))
     prompts += [w for w in watch if w not in prompts]
     source = open_source(args.source)
     detector = await asyncio.to_thread(YoloeDetector, prompts, args.model, device=args.device)
     settings = LiveSettings(rate_hz=args.rate, watch=set(watch), spotlight=args.spotlight)
     log.info("live: detecting %s at %.0f Hz, glowing %s", prompts, args.rate, watch or "nothing")
-    await LivePipeline(bridge, source, detector, settings).run(stop)
+    world = None
+    jobs = []
+    if args.agent:
+        from gvision.world import WorldState
+
+        world = WorldState()
+        jobs.append(_agent(args, bridge, world, stop))
+    pipeline = LivePipeline(bridge, source, detector, settings, world=world)
+    await asyncio.gather(pipeline.run(stop), *jobs)
+
+
+async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.Event) -> None:
+    from gvision.agent.agent import Agent
+    from gvision.agent.qwen import QwenClient
+    from gvision.assistant import Assistant
+
+    qwen = QwenClient(args.qwen_url)
+    if not await qwen.health():
+        log.warning("no llama-server at %s yet; start it (see README) and requests will work", args.qwen_url)
+    tts = asr = recorder = None
+    if not args.no_tts:
+        from gvision.audio.tts import KokoroTTS
+
+        tts = await asyncio.to_thread(KokoroTTS, args.voice)
+    if not args.no_mic:
+        from gvision.audio.asr import load_asr
+        from gvision.audio.mic import Recorder
+
+        asr = await asyncio.to_thread(load_asr, args.asr, args.asr_device, args.whisper_model)
+        recorder = Recorder()
+    assistant = Assistant(bridge, world, Agent(qwen, world), asr=asr, tts=tts, recorder=recorder)
+    if args.no_mic:
+        await assistant.read_stdin(stop)
+        return
+    from gvision.audio.ptt import PushToTalk
+
+    ptt = PushToTalk(args.ptt_key, assistant.ptt_down, assistant.ptt_up)
+    ptt.start(asyncio.get_running_loop())
+    try:
+        await stop.wait()
+    finally:
+        ptt.stop()
+        await qwen.close()
 
 
 def _split(text: str) -> list[str]:
@@ -75,11 +118,21 @@ def main() -> None:
     live = parser.add_argument_group("live")
     live.add_argument("--source", default="screen", help="'screen', 'screen:<n>' or a video/image file")
     live.add_argument("--prompts", default="person", help="comma-separated YOLOE text prompts")
-    live.add_argument("--watch", default="person", help="comma-separated labels that get the gold glow")
+    live.add_argument("--watch", default=None, help="comma-separated labels that always glow gold (default: person, none with --agent)")
     live.add_argument("--spotlight", action="store_true", help="also dim the screen around watched objects")
     live.add_argument("--model", default="yoloe-26s-seg.pt", help="YOLOE weights, downloaded to models/")
     live.add_argument("--device", default=None, help="torch device, e.g. cuda:0 or cpu")
     live.add_argument("--rate", type=float, default=10.0, help="detector rate in Hz (plan: 5-15)")
+    agent = parser.add_argument_group("agent (with --live)")
+    agent.add_argument("--agent", action="store_true", help="push-to-talk questions answered by Qwen with glow + voice")
+    agent.add_argument("--qwen-url", default="http://127.0.0.1:8080", help="llama-server running Qwen3.5-2B")
+    agent.add_argument("--ptt-key", default="f8", help="push-to-talk key: f8, caps_lock, a letter...")
+    agent.add_argument("--asr", choices=["whisper", "nemotron"], default="whisper", help="speech-to-text model")
+    agent.add_argument("--whisper-model", default="medium", help="faster-whisper size: small, medium...")
+    agent.add_argument("--asr-device", default="cuda", help="device for speech-to-text")
+    agent.add_argument("--voice", default="af_heart", help="Kokoro voice")
+    agent.add_argument("--no-mic", action="store_true", help="type requests in the terminal instead of speaking")
+    agent.add_argument("--no-tts", action="store_true", help="show answers without speaking them")
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()

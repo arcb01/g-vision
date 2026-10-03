@@ -1,6 +1,6 @@
 """Agent process (plan section 9).
 
-Will contain: snapshot builder, Qwen3.5-2B client (llama.cpp server,
-OpenAI-compatible API), tools (set_watch, query_state, read_region, ...),
-narrator scheduling and fallbacks. Not implemented yet.
+So far: the Qwen3.5-2B client (llama.cpp server, OpenAI-compatible API), the
+"find X" tools (set_watch, clear_watch, query_state) and the request loop.
+Still to come: segmented answers, read_region, look, the narrator and fallbacks.
 """
