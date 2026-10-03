@@ -102,7 +102,12 @@ class KokoroTTS:
             self.kokoro = Kokoro.from_session(session, voices)
             self.device = "GPU"
         else:
-            self.kokoro = Kokoro(str(_fetch(CPU_MODEL_FILE)), voices)
+            # Kokoro(path) would pick every provider onnxruntime-gpu offers,
+            # including CUDA without the DLLs set up, and fail on first use.
+            import onnxruntime as ort
+
+            cpu = ort.InferenceSession(str(_fetch(CPU_MODEL_FILE)), providers=["CPUExecutionProvider"])
+            self.kokoro = Kokoro.from_session(cpu, voices)
             self.device = "CPU"
         self.voice = voice
         self.speed = speed
