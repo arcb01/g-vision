@@ -18,11 +18,13 @@ dependencies = [
 # Install a CUDA build of torch first (see README), or pip pulls the CPU one.
 tracking = ["numpy>=1.26", "scipy>=1.11"]
 perception = [
-    "gvision[tracking]",
+    "gvision[tracking,ocr]",
     "ultralytics>=8.4.172",  # first version tested; uses quantize= instead of half=
     "opencv-python>=4.9",
     "dxcam>=0.0.5; sys_platform == 'win32'",
 ]
+# Text watcher (plan 7.1): RapidOCR on the CPU; models ship with the wheel.
+ocr = ["rapidocr>=3.9", "onnxruntime>=1.17", "opencv-python>=4.9"]
 # "find X": Qwen client, push-to-talk, faster-whisper and Kokoro (plan 9).
 agent = ["gvision[tracking]", "httpx>=0.27"]
 voice = [

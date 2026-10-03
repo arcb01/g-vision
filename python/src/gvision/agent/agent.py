@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from gvision.agent.qwen import Reply
-from gvision.agent.tools import TOOLS, ToolExecutor, ToolResult
+from gvision.agent.tools import ToolExecutor, ToolResult
 from gvision.world import WorldState
 
 log = logging.getLogger(__name__)
@@ -26,8 +26,14 @@ You can highlight objects on screen with tools.
 - Answer in one short spoken sentence, at most 15 words. No markdown, no lists.
 - Only say what the tool results or the state show. If something was not found, say you \
 can't see it yet and that you're watching for it.
-- You can't read text or look back in time yet; say so briefly if asked.
-Current state: {state}"""
+{abilities}Current state: {state}"""
+
+CAN_READ = """\
+- For any question about text on screen (signs, quests, menus, messages), call read_text, \
+or recent_text for text that already went away. Quote the words that answer the question.
+- You can't look back in time yet; say so briefly if asked.
+"""
+CANNOT_READ = "- You can't read text or look back in time yet; say so briefly if asked.\n"
 
 
 class Chat(Protocol):
@@ -48,6 +54,9 @@ class Answer:
 def fallback_text(results: list[ToolResult]) -> str:
     """Spoken answer built from tool results when Qwen gives none."""
     for r in results:
+        if "text" in r.content:
+            blocks = r.content["text"]
+            return f"It says: {blocks[0]['text']}" if blocks else "I can't see any text there."
         for f in r.content.get("found", []):
             if f["count"]:
                 return f"The {f['target']} is {f['where'][0]}." if f["count"] == 1 else (
@@ -67,10 +76,11 @@ class Agent:
     async def handle(self, request: str) -> Answer:
         t0 = time.perf_counter()
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT.format(state=json.dumps(self.world.snapshot()))},
+            {"role": "system", "content": SYSTEM_PROMPT.format(
+                abilities=CAN_READ if self.tools.text else CANNOT_READ, state=json.dumps(self.world.snapshot()))},
             {"role": "user", "content": request},
         ]
-        reply = await self.qwen.chat(messages, tools=TOOLS)
+        reply = await self.qwen.chat(messages, tools=self.tools.specs)
         latency = {"llm_tool_call": (time.perf_counter() - t0) * 1000}
         if not reply.tool_calls:
             return Answer(reply.content or "Sorry, I didn't get that.", latency_ms=latency)
@@ -88,5 +98,6 @@ class Agent:
         t2 = time.perf_counter()
         final = await self.qwen.chat(messages, max_tokens=60)
         latency["llm_answer"] = (time.perf_counter() - t2) * 1000
-        refs = [ref for r in results for ref in r.refs]
-        return Answer(final.content or fallback_text(results), refs, [c.name for c in reply.tool_calls], latency)
+        text = final.content or fallback_text(results)
+        refs = [ref for r in results for ref in r.refs] + self.tools.highlight_text(text, results)
+        return Answer(text, refs, [c.name for c in reply.tool_calls], latency)
