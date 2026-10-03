@@ -147,12 +147,52 @@ async function httpOk(url, timeoutMs = 1000) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// PIDs listening on a local TCP port, from `netstat -ano` on Windows. The
+// state column is translated on non-English Windows ("ESCUCHANDO"), so a
+// listening socket is recognized by its foreign address ending in ":0".
+function parseNetstat(text, port) {
+  const pids = new Set();
+  for (const line of text.split(/\r?\n/)) {
+    const cols = line.trim().split(/\s+/);
+    if (cols[0] !== 'TCP' || cols.length < 5 || !cols[2].endsWith(':0')) continue;
+    if (cols[1].endsWith(`:${port}`)) pids.add(Number(cols[cols.length - 1]));
+  }
+  pids.delete(0);
+  return [...pids];
+}
+
+// Which process holds a port: used to stop a server this app did not start
+// (an orphan from an earlier run, or one started by hand).
+function listeningPids(port) {
+  if (IS_WIN) {
+    const r = spawnSync('netstat', ['-ano', '-p', 'TCP'], { encoding: 'utf8', windowsHide: true });
+    return r.status === 0 ? parseNetstat(r.stdout, port) : [];
+  }
+  const r = spawnSync('lsof', ['-t', `-iTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' });
+  if (r.error || !r.stdout) return [];
+  return r.stdout.split(/\s+/).filter(Boolean).map(Number);
+}
+
+function killTree(pid) {
+  if (IS_WIN) {
+    // Kill the whole tree; plain kill() would leave grandchildren behind (a
+    // venv's python.exe is a launcher that runs the real interpreter).
+    spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true });
+  } else {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // already gone
+    }
+  }
+}
+
 // One child process: spawn, wait until `isReady()` passes, keep the last log
 // lines for the panel, stop the whole process tree on quit.
 class Service extends EventEmitter {
-  constructor({ name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound = null }) {
+  constructor({ name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound = null, port = null }) {
     super();
-    Object.assign(this, { name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound });
+    Object.assign(this, { name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound, port });
     this.state = 'stopped';
     this.detail = '';
     this.child = null;
@@ -162,6 +202,11 @@ class Service extends EventEmitter {
 
   info() {
     return { name: this.name, label: this.label, state: this.state, detail: this.detail };
+  }
+
+  // New command line (after gvision.config.json changed); used on the next start.
+  update({ exe, args, cwd, notFound = null }) {
+    Object.assign(this, { exe, args, cwd, notFound });
   }
 
   _set(state, detail = '') {
@@ -238,28 +283,54 @@ class Service extends EventEmitter {
   async stop() {
     const child = this.child;
     if (!child) {
-      if (!this.external) this._set('stopped');
+      if (this.external) await this._stopExternal();
+      else this._set('stopped');
       return;
     }
     child.stopRequested = true;
-    const exited = new Promise((r) => child.once('exit', r));
-    if (IS_WIN) {
-      // Kill the whole tree; plain kill() would leave grandchildren behind.
-      spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
-    } else {
-      child.kill('SIGTERM');
-    }
+    this._set('stopping');
+    const exited = child.exitCode !== null || child.signalCode !== null
+      ? Promise.resolve()
+      : new Promise((r) => child.once('exit', r));
+    killTree(child.pid);
     const timer = setTimeout(() => child.kill('SIGKILL'), 3000);
-    await exited;
+    await Promise.race([exited, sleep(6000)]);
     clearTimeout(timer);
     if (this.child === child) this.child = null;
     this._set('stopped');
   }
 
+  // A server we found already running: stop whatever holds its port.
+  async _stopExternal() {
+    const pids = this.port ? listeningPids(this.port).filter((p) => p !== process.pid) : [];
+    if (!pids.length) {
+      this._set(this.state, `can't stop it from here: no process found on port ${this.port}`);
+      return;
+    }
+    this._set('stopping');
+    for (const pid of pids) killTree(pid);
+    const deadline = Date.now() + 6000;
+    while (Date.now() < deadline && (await this.isReady())) await sleep(250);
+    if (await this.isReady()) {
+      this._set('ready', `couldn't stop the process on port ${this.port} (pid ${pids.join(', ')})`);
+      return;
+    }
+    this.external = false;
+    this._set('stopped');
+  }
+
   async restart() {
     await this.stop();
-    await this.start();
+    if (this.state === 'stopped') await this.start();
   }
+}
+
+// The command line for each service name, from a (re)loaded config.
+function serviceCommands(cfg) {
+  return {
+    qwen: llamaCommand(cfg.llama),
+    backend: pythonCommand(cfg.python, cfg.llama.port),
+  };
 }
 
 function createServices(cfg, { logDir = path.join(REPO_ROOT, 'logs') } = {}) {
@@ -270,6 +341,7 @@ function createServices(cfg, { logDir = path.join(REPO_ROOT, 'logs') } = {}) {
       new Service({
         ...llamaCommand(cfg.llama),
         isReady: () => httpOk(`http://127.0.0.1:${port}/health`),
+        port,
         readyTimeoutS: cfg.llama.readyTimeoutS,
         logDir,
       }),
@@ -282,6 +354,7 @@ function createServices(cfg, { logDir = path.join(REPO_ROOT, 'logs') } = {}) {
         ...pythonCommand(cfg.python, cfg.llama.port),
         env: { PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
         isReady: () => portOpen(port),
+        port,
         readyTimeoutS: cfg.python.readyTimeoutS,
         logDir,
       }),
@@ -300,8 +373,10 @@ module.exports = {
   llamaCommand,
   loadConfig,
   merge,
+  parseNetstat,
   portOpen,
   pythonCandidates,
   pythonCommand,
   resolveConfig,
+  serviceCommands,
 };

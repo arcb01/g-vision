@@ -93,11 +93,13 @@ Double-click `G-VISION.bat` in the repository folder (right-click it and pick
 *Send to > Desktop (create shortcut)* to get a desktop icon). From Git Bash,
 `cd app && npm start` does the same. The app starts Qwen in llama-server and
 the Python backend (`python -m gvision --live --agent`) on its own, shows each
-one's state in the control panel under **Startup** (with a Restart button and
-the last error if one fails), and stops both when you close the panel. Their
-output goes to `logs/qwen.log` and `logs/backend.log` (**Open logs** in the
-panel). If a llama-server is already running on the port, the app uses it and
-leaves it running on exit.
+one's state in the control panel under **Startup** (with Start/Restart and Stop
+buttons and the last error if one fails), and stops both when you close the
+panel. Restart re-reads `gvision.config.json`, so a fixed path applies without
+relaunching. Their output goes to `logs/qwen.log` and `logs/backend.log`
+(**Open logs** in the panel). If a server is already running on its port (one
+started by hand, or left over from an earlier run), the app uses it and leaves
+it running on exit; Stop or Restart in the panel stop whatever holds the port.
 
 Paths come from `gvision.config.json` at the repository root. Without one, the
 defaults expect the llama.cpp folder at `~/Desktop/coding projects/G-vision-lab`

@@ -10,5 +10,6 @@ contextBridge.exposeInMainWorld('gvision', {
   onServices: (cb) => ipcRenderer.on('gvision:services', (_e, state) => cb(state)),
   getServices: () => ipcRenderer.invoke('gvision:services'),
   restartService: (name) => ipcRenderer.invoke('gvision:restart-service', name),
+  stopService: (name) => ipcRenderer.invoke('gvision:stop-service', name),
   openLogs: () => ipcRenderer.invoke('gvision:open-logs'),
 });

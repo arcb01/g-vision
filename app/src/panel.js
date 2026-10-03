@@ -81,12 +81,21 @@ function renderServices({ managed, error, services }) {
       detail.className = 'detail';
       detail.textContent = s.detail;
       const action = document.createElement('td');
-      if (s.state !== 'starting') {
+      const busy = s.state === 'stopping';
+      const button = (text, onClick) => {
         const btn = document.createElement('button');
-        btn.textContent = s.state === 'ready' ? 'Restart' : 'Start';
-        btn.addEventListener('click', () => window.gvision.restartService(s.name));
+        btn.textContent = text;
+        btn.disabled = busy;
+        btn.addEventListener('click', () => {
+          // Feedback right away; the next state update re-renders the row.
+          for (const b of action.querySelectorAll('button')) b.disabled = true;
+          onClick();
+        });
         action.appendChild(btn);
-      }
+      };
+      const running = s.state === 'ready' || s.state === 'starting' || busy;
+      button(running ? 'Restart' : 'Start', () => window.gvision.restartService(s.name));
+      if (running) button('Stop', () => window.gvision.stopService(s.name));
       tr.append(name, state, detail, action);
       return tr;
     }),
