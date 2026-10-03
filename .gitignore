@@ -18,3 +18,7 @@ data/
 
 .DS_Store
 Thumbs.db
+
+# Ultralytics downloads weights next to where it runs
+*.pt
+mobileclip*.ts
