@@ -152,3 +152,49 @@ def test_qwen_client_survives_malformed_arguments(args):
         return await client.chat([])
 
     assert asyncio.run(run()).tool_calls[0].arguments == {}
+
+
+def look_executor(world, seen):
+    from gvision.agent.tools import ToolResult
+    from gvision.memory.look import SCHEMA
+
+    tools = ToolExecutor(world)
+
+    async def look(question="", seconds=10):
+        seen.append((question, seconds))
+        return ToolResult({"seen": "You have 10 bullets."}, speak="You have 10 bullets.")
+
+    tools.register(SCHEMA, look)
+    return tools
+
+
+def test_counting_something_untracked_falls_back_to_look():
+    world = WorldState()
+    world.set_objects(1.0, [obj("obj:1", "person")])
+    seen = []
+    qwen = FakeQwen(tool_reply("query_state"))
+    agent = Agent(qwen, world, look_executor(world, seen))
+    answer = asyncio.run(agent.handle("How many bullets do I have left?"))
+    assert seen == [("How many bullets do I have left?", 0)]
+    assert answer.text == "You have 10 bullets." and answer.tool_calls == ["query_state", "look"]
+    assert [s.title for s in answer.steps][-3:] == [
+        "Nothing tracked matches: look instead", "Qwen vision: look at recent frames", "Answer taken from the tool"]
+
+
+def test_counting_tracked_objects_does_not_look():
+    world = WorldState()
+    world.set_objects(1.0, [obj("obj:1", "cow"), obj("obj:2", "cow", x=0.6)])
+    seen = []
+    qwen = FakeQwen(tool_reply("query_state"), Reply("There are 2 cows."))
+    agent = Agent(qwen, world, look_executor(world, seen))
+    answer = asyncio.run(agent.handle("How many cows are there?"))
+    assert seen == [] and answer.text == "There are 2 cows."
+
+
+def test_hud_numbers_are_routed_to_read_text():
+    by_name = {t["function"]["name"]: t["function"]["description"] for t in TOOLS}
+    assert "ammo" in by_name["query_state"] and "read_text" in by_name["query_state"]
+    from gvision.agent.tools import TEXT_TOOLS
+
+    about = TEXT_TOOLS[0]["function"]["parameters"]["properties"]["about"]["description"]
+    assert "'quest'" not in about  # Qwen copied the example into every call
