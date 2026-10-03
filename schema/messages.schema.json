@@ -270,7 +270,7 @@
           "type": "boolean"
         },
         "strength": {
-          "default": 0.45,
+          "default": 0.6,
           "maximum": 1.0,
           "minimum": 0.0,
           "title": "Strength",
@@ -386,6 +386,17 @@
           "default": false,
           "title": "Uncertain",
           "type": "boolean"
+        },
+        "box": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Box"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -395,7 +406,8 @@
         "ref",
         "style",
         "color_role",
-        "uncertain"
+        "uncertain",
+        "box"
       ],
       "title": "HighlightMsg",
       "type": "object"

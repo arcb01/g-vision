@@ -1,8 +1,9 @@
 """Synthetic perception and agent output, so the overlay can be developed
 before capture, detection and Qwen exist.
 
-Moves a few fake objects around the screen and plays a scripted, segmented
-answer with spotlight focus every few seconds.
+Moves a few fake objects around the screen and, every few seconds, plays a
+scripted segmented answer with spotlight focus: alternately warning about
+objects and reading a sign on screen.
 """
 
 from __future__ import annotations
@@ -18,9 +19,11 @@ from gvision.protocol import (
     AnswerMsg,
     Box,
     ClearMsg,
+    ConfigChangedMsg,
     DimMsg,
     FocusMsg,
     HighlightMsg,
+    Message,
     ObjectsMsg,
     Segment,
     SegmentStartedMsg,
@@ -86,37 +89,74 @@ async def _stream_status(bridge: Bridge, stop: asyncio.Event) -> None:
         await asyncio.sleep(1.0)
 
 
-async def _play_answers(bridge: Bridge, stop: asyncio.Event) -> None:
-    script = [
-        Segment(id=0, text="There's an explosive barrel on your left,", refs=["obj:22"]),
-        Segment(id=1, text="spikes just ahead,", refs=["obj:31"]),
-        Segment(id=2, text="and a guard behind the crates.", refs=["obj:21"]),
-    ]
+# A sign on screen that the text watcher would have found (plan 7.1).
+_SIGN = Box(x=0.72, y=0.08, w=0.2, h=0.07)
+
+_ANSWERS = [
+    (
+        "danger",
+        [
+            Segment(id=0, text="There's an explosive barrel on your left,", refs=["obj:22"]),
+            Segment(id=1, text="spikes just ahead,", refs=["obj:31"]),
+            Segment(id=2, text="and a guard behind the crates.", refs=["obj:21"]),
+        ],
+    ),
+    (
+        "info",
+        [
+            Segment(id=0, text="The sign at the top right says:", refs=["text:7"]),
+            Segment(id=1, text="'Danger, falling rocks ahead.'", refs=["text:7"]),
+        ],
+    ),
+]
+
+
+class DemoSettings:
+    """The slice of the config the demo reacts to (plan 13.6)."""
+
+    def __init__(self) -> None:
+        self.dim_strength = DimMsg.model_fields["strength"].default
+        self.dim_on = False
+
+
+async def _play_answers(bridge: Bridge, stop: asyncio.Event, settings: DemoSettings) -> None:
     for n in itertools.count(1):
         await asyncio.sleep(ANSWER_EVERY_SECONDS)
         if stop.is_set():
             return
         if not bridge.connected:
             continue
+        color_role, script = _ANSWERS[(n - 1) % len(_ANSWERS)]
         answer_id = f"demo-{n}"
         bridge.send(AnswerMsg(answer_id=answer_id, segments=script))
-        for seg in script:
-            for ref in seg.refs:
-                bridge.send(HighlightMsg(ref=ref, color_role="danger"))
-        bridge.send(DimMsg(on=True))
+        for ref in dict.fromkeys(ref for seg in script for ref in seg.refs):
+            box = _SIGN if ref.startswith("text:") else None
+            bridge.send(HighlightMsg(ref=ref, color_role=color_role, box=box))
+        settings.dim_on = True
+        bridge.send(DimMsg(on=True, strength=settings.dim_strength))
         for seg in script:
             bridge.send(SegmentStartedMsg(answer_id=answer_id, segment_id=seg.id))
             bridge.send(FocusMsg(refs=seg.refs, segment_id=seg.id))
             await asyncio.sleep(SEGMENT_SECONDS)
         bridge.send(AnswerFinishedMsg(answer_id=answer_id))
         await asyncio.sleep(2.0)  # hold after speaking (plan 6.1)
-        bridge.send(DimMsg(on=False))
+        settings.dim_on = False
+        bridge.send(DimMsg(on=False, strength=settings.dim_strength))
         bridge.send(ClearMsg(reason="demo answer finished"))
 
 
 async def run_demo(bridge: Bridge, stop: asyncio.Event) -> None:
+    settings = DemoSettings()
+
+    async def on_message(msg: Message) -> None:
+        if isinstance(msg, ConfigChangedMsg) and "visual_effects.dim_strength" in msg.changes:
+            settings.dim_strength = float(msg.changes["visual_effects.dim_strength"])
+            if settings.dim_on:
+                bridge.send(DimMsg(on=True, strength=settings.dim_strength))
+
+    bridge.on_message(on_message)
     await asyncio.gather(
         _stream_objects(bridge, stop),
         _stream_status(bridge, stop),
-        _play_answers(bridge, stop),
+        _play_answers(bridge, stop, settings),
     )

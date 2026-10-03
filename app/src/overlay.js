@@ -6,14 +6,21 @@ const COLORS = { target: 0xffc83d, danger: 0xff4d4d, info: 0x3de0ff };
 const SUBTLE = 0xffffff;
 const DIM_FADE_MS = 200;
 const MAX_EXTRAPOLATION_S = 0.25;
+const CUTOUT_PAD_PX = 12;
+// Glow: a blurred wide stroke under a dark edge and a bright core (plan 6.3).
+const GLOW_WIDTH_PX = 14;
+const GLOW_BLUR = 10;
+const CORE_WIDTH_PX = { focused: 4, mentioned: 3 };
+const PULSE_HZ = 1; // slow, well below flashing (plan 6.3)
+const PULSE_DEPTH = 0.2;
 // Developer aid until the debug overlay exists: show unhighlighted tracks faintly.
 const SHOW_ALL_TRACKS = true;
 
 const state = {
   objects: { frameTs: 0, list: [] },
-  highlights: new Map(), // ref -> {style, color_role, uncertain}
+  highlights: new Map(), // ref -> highlight message (with box for text:/region: refs)
   focus: new Set(),
-  dim: { on: false, strength: 0.45, alpha: 0 },
+  dim: { on: false, strength: 0.6, alpha: 0 },
 };
 
 function handle(msg) {
@@ -48,15 +55,33 @@ function extrapolated(obj, nowS) {
   return { x: obj.box.x + vx * dt, y: obj.box.y + vy * dt, w: obj.box.w, h: obj.box.h };
 }
 
+// Everything that can be drawn this frame: tracked objects, plus highlighted
+// text blocks and regions, which carry their own box.
+function elements(nowS) {
+  const out = [];
+  const tracked = new Set();
+  for (const obj of state.objects.list) {
+    tracked.add(obj.ref);
+    if (obj.status === 'tentative') continue; // only confirmed objects glow
+    out.push({ ref: obj.ref, label: obj.label, box: extrapolated(obj, nowS) });
+  }
+  for (const [ref, hl] of state.highlights) {
+    if (!tracked.has(ref) && hl.box) out.push({ ref, label: null, box: hl.box });
+  }
+  return out;
+}
+
 async function main() {
   const app = new PIXI.Application();
   await app.init({ resizeTo: window, backgroundAlpha: 0, antialias: true });
   document.body.appendChild(app.canvas);
 
   const dimLayer = new PIXI.Graphics();
+  const glowLayer = new PIXI.Graphics();
+  glowLayer.filters = [new PIXI.BlurFilter({ strength: GLOW_BLUR, quality: 4 })];
   const outlineLayer = new PIXI.Graphics();
   const labelLayer = new PIXI.Container();
-  app.stage.addChild(dimLayer, outlineLayer, labelLayer);
+  app.stage.addChild(dimLayer, glowLayer, outlineLayer, labelLayer);
   const labels = new Map(); // ref -> PIXI.Text
 
   window.gvision.onMessage(handle);
@@ -67,46 +92,57 @@ async function main() {
     const nowS = Date.now() / 1000;
     const step = ticker.deltaMS / DIM_FADE_MS;
     const target = state.dim.on ? state.dim.strength : 0;
-    state.dim.alpha += Math.sign(target - state.dim.alpha) * Math.min(Math.abs(target - state.dim.alpha), step * state.dim.strength);
+    state.dim.alpha += Math.sign(target - state.dim.alpha) * Math.min(Math.abs(target - state.dim.alpha), step * Math.max(state.dim.strength, 0.1));
+    const pulse = 1 - PULSE_DEPTH * (0.5 + 0.5 * Math.sin(2 * Math.PI * PULSE_HZ * nowS));
 
-    const boxes = state.objects.list.map((obj) => {
-      const b = extrapolated(obj, nowS);
-      return { obj, px: { x: b.x * W, y: b.y * H, w: b.w * W, h: b.h * H } };
-    });
+    const els = elements(nowS).map((el) => ({
+      ...el,
+      px: { x: el.box.x * W, y: el.box.y * H, w: el.box.w * W, h: el.box.h * H },
+    }));
 
     // Dim layer with cut-outs around focused elements (box-shaped for now).
     dimLayer.clear();
     if (state.dim.alpha > 0.001) {
       dimLayer.rect(0, 0, W, H).fill({ color: 0x000000, alpha: state.dim.alpha });
-      for (const { obj, px } of boxes) {
-        if (state.focus.has(obj.ref)) dimLayer.roundRect(px.x - 12, px.y - 12, px.w + 24, px.h + 24, 12).cut();
+      for (const { ref, px } of els) {
+        if (state.focus.has(ref)) {
+          dimLayer.roundRect(px.x - CUTOUT_PAD_PX, px.y - CUTOUT_PAD_PX, px.w + 2 * CUTOUT_PAD_PX, px.h + 2 * CUTOUT_PAD_PX, 12).cut();
+        }
       }
     }
 
-    // Layered outline: dark outer edge + bright core (plan 6.3).
+    glowLayer.clear();
     outlineLayer.clear();
     const seen = new Set();
-    for (const { obj, px } of boxes) {
-      if (obj.status === 'tentative') continue; // only confirmed objects glow
-      const hl = state.highlights.get(obj.ref);
+    for (const { ref, label: text, px } of els) {
+      const hl = state.highlights.get(ref);
       if (!hl && !SHOW_ALL_TRACKS) continue;
-      const focused = state.focus.has(obj.ref);
+      const focused = state.focus.has(ref);
       const color = hl ? COLORS[hl.color_role] : SUBTLE;
-      const alpha = hl ? (focused || state.focus.size === 0 ? 1 : 0.55) : 0.25;
-      const core = focused ? 3 : 2;
-      outlineLayer.roundRect(px.x, px.y, px.w, px.h, 6).stroke({ width: core + 4, color: 0x000000, alpha: alpha * 0.6 });
-      outlineLayer.roundRect(px.x, px.y, px.w, px.h, 6).stroke({ width: core, color, alpha });
+      const r = 6;
 
-      let label = labels.get(obj.ref);
-      if (!label) {
-        label = new PIXI.Text({ text: obj.label, style: { fontFamily: 'Segoe UI, sans-serif', fontSize: 14, fill: 0xffffff, stroke: { color: 0x000000, width: 3 } } });
-        labelLayer.addChild(label);
-        labels.set(obj.ref, label);
+      let alpha = 0.25; // unhighlighted debug track
+      if (hl) {
+        alpha = focused || state.focus.size === 0 ? 1 : 0.7;
+        const glowAlpha = focused ? pulse : 0.5;
+        glowLayer.roundRect(px.x, px.y, px.w, px.h, r).stroke({ width: GLOW_WIDTH_PX, color, alpha: glowAlpha });
+        if (focused) glowLayer.roundRect(px.x, px.y, px.w, px.h, r).fill({ color, alpha: 0.12 * pulse });
       }
-      label.text = obj.label;
+      const core = focused ? CORE_WIDTH_PX.focused : CORE_WIDTH_PX.mentioned;
+      outlineLayer.roundRect(px.x, px.y, px.w, px.h, r).stroke({ width: core + 4, color: 0x000000, alpha: alpha * 0.7 });
+      outlineLayer.roundRect(px.x, px.y, px.w, px.h, r).stroke({ width: core, color, alpha });
+
+      if (text == null) continue;
+      let label = labels.get(ref);
+      if (!label) {
+        label = new PIXI.Text({ text, style: { fontFamily: 'Segoe UI, sans-serif', fontSize: 14, fill: 0xffffff, stroke: { color: 0x000000, width: 3 } } });
+        labelLayer.addChild(label);
+        labels.set(ref, label);
+      }
+      label.text = text;
       label.alpha = alpha;
-      label.position.set(px.x, px.y - 20);
-      seen.add(obj.ref);
+      label.position.set(px.x, px.y - 22);
+      seen.add(ref);
     }
     for (const [ref, label] of labels) {
       if (!seen.has(ref)) {

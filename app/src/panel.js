@@ -85,6 +85,10 @@ document.getElementById('clear').addEventListener('click', () => {
   window.gvision.send(msg('clear', { reason: 'panel button' }));
 });
 
+document.getElementById('dim').addEventListener('input', (e) => {
+  document.getElementById('dim-value').textContent = `${Math.round(Number(e.target.value) * 100)}%`;
+});
+
 document.getElementById('dim').addEventListener('change', (e) => {
   window.gvision.send(msg('config_changed', { changes: { 'visual_effects.dim_strength': Number(e.target.value) } }));
 });

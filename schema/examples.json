@@ -5,7 +5,9 @@
      "outline": [[0.18, 0.62], [0.23, 0.62], [0.23, 0.70], [0.18, 0.70]],
      "velocity": [0.0, 0.01], "status": "confirmed"}
   ]},
-  {"v": 1, "ts": 1759500000.1, "type": "highlight", "ref": "obj:22", "style": "glow", "color_role": "danger", "uncertain": false},
+  {"v": 1, "ts": 1759500000.1, "type": "highlight", "ref": "obj:22", "style": "glow", "color_role": "danger", "uncertain": false, "box": null},
+  {"v": 1, "ts": 1759500000.15, "type": "highlight", "ref": "text:7", "style": "glow", "color_role": "info", "uncertain": false,
+   "box": {"x": 0.72, "y": 0.08, "w": 0.2, "h": 0.07}},
   {"v": 1, "ts": 1759500000.2, "type": "focus", "refs": ["obj:22"], "segment_id": 0},
   {"v": 1, "ts": 1759500000.3, "type": "dim", "on": true, "strength": 0.45},
   {"v": 1, "ts": 1759500000.4, "type": "answer", "answer_id": "a1", "segments": [

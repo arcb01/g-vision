@@ -95,6 +95,9 @@ class HighlightMsg(_Message):
     color_role: ColorRole
     uncertain: bool = False
     """Rendered as a dashed outline."""
+    box: Box | None = None
+    """Where the element is, for ``text:`` and ``region:`` refs that don't
+    appear in ``objects`` messages. ``obj:`` refs follow their track instead."""
 
 
 class FocusMsg(_Message):
@@ -110,7 +113,8 @@ class DimMsg(_Message):
 
     type: Literal["dim"] = "dim"
     on: bool
-    strength: Unit = 0.45
+    strength: Unit = 0.6
+    """Opacity of the dark layer; 0 is no dimming, 1 is black."""
 
 
 class AnswerMsg(_Message):
