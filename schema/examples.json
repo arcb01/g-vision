@@ -1,0 +1,23 @@
+[
+  {"v": 1, "ts": 1759500000.0, "type": "objects", "frame_ts": 1759500000.0, "objects": [
+    {"ref": "obj:22", "label": "explosive barrel", "confidence": 0.91,
+     "box": {"x": 0.18, "y": 0.62, "w": 0.05, "h": 0.08},
+     "outline": [[0.18, 0.62], [0.23, 0.62], [0.23, 0.70], [0.18, 0.70]],
+     "velocity": [0.0, 0.01], "status": "confirmed"}
+  ]},
+  {"v": 1, "ts": 1759500000.1, "type": "highlight", "ref": "obj:22", "style": "glow", "color_role": "danger", "uncertain": false},
+  {"v": 1, "ts": 1759500000.2, "type": "focus", "refs": ["obj:22"], "segment_id": 0},
+  {"v": 1, "ts": 1759500000.3, "type": "dim", "on": true, "strength": 0.45},
+  {"v": 1, "ts": 1759500000.4, "type": "answer", "answer_id": "a1", "segments": [
+    {"id": 0, "text": "There's an explosive barrel on your left,", "refs": ["obj:22"]},
+    {"id": 1, "text": "spikes just ahead,", "refs": ["obj:31"]},
+    {"id": 2, "text": "and the sign says 'Danger'.", "refs": ["text:7"]}
+  ]},
+  {"v": 1, "ts": 1759500000.5, "type": "segment_started", "answer_id": "a1", "segment_id": 0},
+  {"v": 1, "ts": 1759500003.0, "type": "answer_finished", "answer_id": "a1"},
+  {"v": 1, "ts": 1759500004.0, "type": "badges", "badges": [{"number": 1, "ref": "text:7"}, {"number": 2, "ref": "region:top_right"}]},
+  {"v": 1, "ts": 1759500005.0, "type": "status", "perception_fps": 60.0, "game_fps": 144.0, "vram_used_mb": 5120.0,
+   "latency_ms": {"detector": 12.5}, "components": {"capture": "running", "detector": "running"}},
+  {"v": 1, "ts": 1759500006.0, "type": "clear", "reason": "dismiss hotkey"},
+  {"v": 1, "ts": 1759500007.0, "type": "config_changed", "changes": {"visual_effects.dim_strength": 0.4}}
+]

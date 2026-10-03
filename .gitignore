@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+build/
+dist/
+
+# Node / Electron
+node_modules/
+out/
+
+# Model weights and local game data are downloaded at runtime, never committed
+models/
+data/
+
+.DS_Store
+Thumbs.db

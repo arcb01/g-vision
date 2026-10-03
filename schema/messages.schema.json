@@ -1,0 +1,743 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arcb01/g-vision/schema/messages.schema.json",
+  "title": "G-VISION message",
+  "description": "Generated from python/src/gvision/protocol/messages.py. Do not edit by hand.",
+  "$defs": {
+    "AnswerFinishedMsg": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "answer_finished",
+          "default": "answer_finished",
+          "title": "Type",
+          "type": "string"
+        },
+        "answer_id": {
+          "title": "Answer Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "answer_id"
+      ],
+      "title": "AnswerFinishedMsg",
+      "type": "object"
+    },
+    "AnswerMsg": {
+      "additionalProperties": false,
+      "description": "Show an answer in the panel, split into speakable segments.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "answer",
+          "default": "answer",
+          "title": "Type",
+          "type": "string"
+        },
+        "answer_id": {
+          "title": "Answer Id",
+          "type": "string"
+        },
+        "segments": {
+          "items": {
+            "$ref": "#/$defs/Segment"
+          },
+          "title": "Segments",
+          "type": "array"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "answer_id",
+        "segments"
+      ],
+      "title": "AnswerMsg",
+      "type": "object"
+    },
+    "Badge": {
+      "additionalProperties": false,
+      "properties": {
+        "number": {
+          "minimum": 1,
+          "title": "Number",
+          "type": "integer"
+        },
+        "ref": {
+          "pattern": "^(obj|text|region):[A-Za-z0-9_.-]+$",
+          "title": "Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "ref"
+      ],
+      "title": "Badge",
+      "type": "object"
+    },
+    "BadgesMsg": {
+      "additionalProperties": false,
+      "description": "Numbered choices when a request is ambiguous.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "badges",
+          "default": "badges",
+          "title": "Type",
+          "type": "string"
+        },
+        "badges": {
+          "items": {
+            "$ref": "#/$defs/Badge"
+          },
+          "title": "Badges",
+          "type": "array"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "badges"
+      ],
+      "title": "BadgesMsg",
+      "type": "object"
+    },
+    "Box": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        },
+        "w": {
+          "minimum": 0.0,
+          "title": "W",
+          "type": "number"
+        },
+        "h": {
+          "minimum": 0.0,
+          "title": "H",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "w",
+        "h"
+      ],
+      "title": "Box",
+      "type": "object"
+    },
+    "ClearMsg": {
+      "additionalProperties": false,
+      "description": "Cancel speech, highlights and dimming (interrupt or dismiss).",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "clear",
+          "default": "clear",
+          "title": "Type",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "reason"
+      ],
+      "title": "ClearMsg",
+      "type": "object"
+    },
+    "ConfigChangedMsg": {
+      "additionalProperties": false,
+      "description": "Settings edited in the control panel.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "config_changed",
+          "default": "config_changed",
+          "title": "Type",
+          "type": "string"
+        },
+        "changes": {
+          "additionalProperties": true,
+          "title": "Changes",
+          "type": "object"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "changes"
+      ],
+      "title": "ConfigChangedMsg",
+      "type": "object"
+    },
+    "DimMsg": {
+      "additionalProperties": false,
+      "description": "Control the spotlight dim layer.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "dim",
+          "default": "dim",
+          "title": "Type",
+          "type": "string"
+        },
+        "on": {
+          "title": "On",
+          "type": "boolean"
+        },
+        "strength": {
+          "default": 0.45,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Strength",
+          "type": "number"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "on",
+        "strength"
+      ],
+      "title": "DimMsg",
+      "type": "object"
+    },
+    "FocusMsg": {
+      "additionalProperties": false,
+      "description": "Move the spotlight to these elements.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "focus",
+          "default": "focus",
+          "title": "Type",
+          "type": "string"
+        },
+        "refs": {
+          "items": {
+            "pattern": "^(obj|text|region):[A-Za-z0-9_.-]+$",
+            "type": "string"
+          },
+          "title": "Refs",
+          "type": "array"
+        },
+        "segment_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Segment Id"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "refs",
+        "segment_id"
+      ],
+      "title": "FocusMsg",
+      "type": "object"
+    },
+    "HighlightMsg": {
+      "additionalProperties": false,
+      "description": "Set an element's glow style and meaning.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "highlight",
+          "default": "highlight",
+          "title": "Type",
+          "type": "string"
+        },
+        "ref": {
+          "pattern": "^(obj|text|region):[A-Za-z0-9_.-]+$",
+          "title": "Ref",
+          "type": "string"
+        },
+        "style": {
+          "default": "glow",
+          "enum": [
+            "glow",
+            "outline",
+            "subtle"
+          ],
+          "title": "Style",
+          "type": "string"
+        },
+        "color_role": {
+          "enum": [
+            "target",
+            "danger",
+            "info"
+          ],
+          "title": "Color Role",
+          "type": "string"
+        },
+        "uncertain": {
+          "default": false,
+          "title": "Uncertain",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "ref",
+        "style",
+        "color_role",
+        "uncertain"
+      ],
+      "title": "HighlightMsg",
+      "type": "object"
+    },
+    "ObjectsMsg": {
+      "additionalProperties": false,
+      "description": "Tracked objects for one frame.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "objects",
+          "default": "objects",
+          "title": "Type",
+          "type": "string"
+        },
+        "frame_ts": {
+          "title": "Frame Ts",
+          "type": "number"
+        },
+        "objects": {
+          "items": {
+            "$ref": "#/$defs/TrackedObject"
+          },
+          "title": "Objects",
+          "type": "array"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "frame_ts",
+        "objects"
+      ],
+      "title": "ObjectsMsg",
+      "type": "object"
+    },
+    "Segment": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minimum": 0,
+          "title": "Id",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "refs": {
+          "default": [],
+          "items": {
+            "pattern": "^(obj|text|region):[A-Za-z0-9_.-]+$",
+            "type": "string"
+          },
+          "title": "Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "refs"
+      ],
+      "title": "Segment",
+      "type": "object"
+    },
+    "SegmentStartedMsg": {
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "segment_started",
+          "default": "segment_started",
+          "title": "Type",
+          "type": "string"
+        },
+        "answer_id": {
+          "title": "Answer Id",
+          "type": "string"
+        },
+        "segment_id": {
+          "title": "Segment Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "answer_id",
+        "segment_id"
+      ],
+      "title": "SegmentStartedMsg",
+      "type": "object"
+    },
+    "StatusMsg": {
+      "additionalProperties": false,
+      "description": "Dashboard metrics.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "status",
+          "default": "status",
+          "title": "Type",
+          "type": "string"
+        },
+        "perception_fps": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perception Fps"
+        },
+        "game_fps": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Game Fps"
+        },
+        "vram_used_mb": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vram Used Mb"
+        },
+        "latency_ms": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "default": {},
+          "title": "Latency Ms",
+          "type": "object"
+        },
+        "components": {
+          "additionalProperties": {
+            "enum": [
+              "running",
+              "paused",
+              "off",
+              "error"
+            ],
+            "type": "string"
+          },
+          "default": {},
+          "title": "Components",
+          "type": "object"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "perception_fps",
+        "game_fps",
+        "vram_used_mb",
+        "latency_ms",
+        "components"
+      ],
+      "title": "StatusMsg",
+      "type": "object"
+    },
+    "TrackedObject": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "pattern": "^(obj|text|region):[A-Za-z0-9_.-]+$",
+          "title": "Ref",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "box": {
+          "$ref": "#/$defs/Box"
+        },
+        "outline": {
+          "anyOf": [
+            {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outline"
+        },
+        "velocity": {
+          "default": [
+            0.0,
+            0.0
+          ],
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Velocity",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "tentative",
+            "confirmed",
+            "lost"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref",
+        "label",
+        "confidence",
+        "box",
+        "outline",
+        "velocity",
+        "status"
+      ],
+      "title": "TrackedObject",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "answer": "#/$defs/AnswerMsg",
+      "answer_finished": "#/$defs/AnswerFinishedMsg",
+      "badges": "#/$defs/BadgesMsg",
+      "clear": "#/$defs/ClearMsg",
+      "config_changed": "#/$defs/ConfigChangedMsg",
+      "dim": "#/$defs/DimMsg",
+      "focus": "#/$defs/FocusMsg",
+      "highlight": "#/$defs/HighlightMsg",
+      "objects": "#/$defs/ObjectsMsg",
+      "segment_started": "#/$defs/SegmentStartedMsg",
+      "status": "#/$defs/StatusMsg"
+    },
+    "propertyName": "type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ObjectsMsg"
+    },
+    {
+      "$ref": "#/$defs/HighlightMsg"
+    },
+    {
+      "$ref": "#/$defs/FocusMsg"
+    },
+    {
+      "$ref": "#/$defs/DimMsg"
+    },
+    {
+      "$ref": "#/$defs/AnswerMsg"
+    },
+    {
+      "$ref": "#/$defs/SegmentStartedMsg"
+    },
+    {
+      "$ref": "#/$defs/AnswerFinishedMsg"
+    },
+    {
+      "$ref": "#/$defs/BadgesMsg"
+    },
+    {
+      "$ref": "#/$defs/StatusMsg"
+    },
+    {
+      "$ref": "#/$defs/ClearMsg"
+    },
+    {
+      "$ref": "#/$defs/ConfigChangedMsg"
+    }
+  ]
+}
