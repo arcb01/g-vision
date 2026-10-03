@@ -1,0 +1,13 @@
+{
+  "llama": {
+    "dir": "~/Desktop/coding projects/G-vision-lab",
+    "server": "llama/llama-server.exe",
+    "model": "models/Qwen3.5-2B-Q4_K_M.gguf",
+    "mmproj": "models/mmproj-F16.gguf",
+    "port": 8080
+  },
+  "python": {
+    "exe": ".venv/Scripts/python.exe",
+    "args": ["--live", "--agent"]
+  }
+}

@@ -38,8 +38,11 @@ python/            Perception, agent and audio processes (package: gvision)
       tts.py       Kokoro-82M on the CPU (ONNX Runtime)
 app/               Electron app: transparent overlay + control panel
   main.js          Owns the bridge connection, validates and forwards messages
+  services.js      Starts and stops llama-server and the Python backend
   src/overlay.*    PixiJS overlay: outlines, semantic colors, spotlight dimming
   src/panel.*      Control panel shell: dashboard, answer, controls
+G-VISION.bat       Double-click launcher (Windows)
+gvision.config.example.json  Launcher paths; copy to gvision.config.json
 schema/
   messages.schema.json  Generated JSON Schema (do not edit by hand)
   examples.json         One example of every message, tested from both sides
@@ -78,6 +81,30 @@ pip install -e ".[dev,perception]"
 YOLOE weights (`yoloe-26s-seg.pt`, ~30 MB) and its text encoder download on
 first run into `python/models/` and the current folder; neither is committed.
 
+## Start everything with one click (Windows)
+
+Double-click `G-VISION.bat` in the repository folder (right-click it and pick
+*Send to > Desktop (create shortcut)* to get a desktop icon). From Git Bash,
+`cd app && npm start` does the same. The app starts Qwen in llama-server and
+the Python backend (`python -m gvision --live --agent`) on its own, shows each
+one's state in the control panel under **Startup** (with a Restart button and
+the last error if one fails), and stops both when you close the panel. Their
+output goes to `logs/qwen.log` and `logs/backend.log` (**Open logs** in the
+panel). If a llama-server is already running on the port, the app uses it and
+leaves it running on exit.
+
+Paths come from `gvision.config.json` at the repository root. Without one, the
+defaults expect the llama.cpp folder at `~/Desktop/coding projects/G-vision-lab`
+(with `llama/llama-server.exe` and `models/Qwen3.5-2B-Q4_K_M.gguf` plus
+`models/mmproj-F16.gguf`) and the Python virtual environment at
+`python/.venv`. To change them, copy `gvision.config.example.json` to
+`gvision.config.json` and edit it; `python.args` sets the backend's options,
+e.g. `["--live", "--agent", "--prompts", "person,cow", "--whisper-model", "small"]`.
+
+Other ways to start: `G-VISION.bat --demo` (or `npm start -- --demo`) runs the
+synthetic demo without Qwen, and `npm start -- --no-services` only opens the
+app so you can start the processes by hand as described below.
+
 ## Run the live demo (Windows)
 
 Start the app (`npm start` in `app/`), then in another terminal:
@@ -98,7 +125,8 @@ slower), `--source clip.mp4` (replay a recording instead of the screen),
 ## Find X with your voice (Windows)
 
 Three things run side by side: the app, Qwen in llama.cpp's server, and the
-Python process.
+Python process. `G-VISION.bat` starts all three (see above); the steps below
+are the manual way.
 
 1. Install the voice extras (after the CUDA torch and perception extras above):
 
