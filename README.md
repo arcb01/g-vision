@@ -179,6 +179,27 @@ terminal), `--no-tts`, `--qwen-url`. The first run downloads the Whisper
 weights to the Hugging Face cache and Kokoro (~120 MB) into
 `python/models/kokoro/`.
 
+### Ask about text on screen
+
+With `--agent`, a text watcher reads the screen in the background with
+RapidOCR (plan 7.1), so you can ask "what does that sign say?", "what's my
+quest?", "read the menu" or "what did that message say?". Qwen calls
+`read_text` (optionally with a word like "quest" or a place like "top right")
+or `recent_text` for text that has already gone, quotes the answer, and the
+text block it quotes gets a cyan contour with a light fill while the rest of
+the screen dims. Nothing is written on the overlay.
+
+It runs on the CPU (4 threads, no GPU), about twice a second: only screen
+tiles that changed are searched for text, whole-screen detection happens at
+most once a second, and only new or changed lines are read. Areas where text
+keeps changing (chat, notifications, subtitles) become learned zones that are
+checked on every pass, and text that never changes ("HP") is ranked last.
+What it learns is saved per game in `data/profiles/<game exe>.json`.
+RapidOCR and its models come with the `perception` extra (or `.[ocr]` on its
+own); without it the backend logs a warning and runs without reading text.
+Options: `--no-text`, `--ocr-threads 2`, `--ocr-side 960` (faster detection,
+misses smaller text), `--text-profiles DIR`.
+
 ### Scene memory: "what just hit me?"
 
 With `--agent`, the backend also remembers the last minute of the screen

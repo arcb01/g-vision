@@ -208,3 +208,13 @@ def test_look_without_frames_reports_an_error():
 def test_situation_notes_skip_unknowns():
     s = Situation(ts=1.0, situation="In a cave.", player="unknown", objective="", summary="Explored.")
     assert s.notes() == {"situation": "In a cave.", "summary": "Explored."}
+
+
+def test_look_and_text_tools_offered_together():
+    tools = ToolExecutor(WorldState(), text=object())
+    tools.register(SCHEMA, LookTool(FakeQwen(), FrameHistory()), HINT)
+    names = [t["function"]["name"] for t in tools.specs]
+    assert {"read_text", "recent_text", "look"} <= set(names)
+    abilities = Agent(FakeQwen(), WorldState(), tools).abilities()
+    assert "call read_text" in abilities and "call look" in abilities
+    assert "can't" not in abilities

@@ -3,6 +3,7 @@
     python -m gvision --demo                    synthetic objects and answers
     python -m gvision --live --watch person     capture + YOLOE + ByteTrack
     python -m gvision --live --agent            + push-to-talk, Qwen, Kokoro: "find X",
+                                                  reading on-screen text (RapidOCR) and
                                                   scene memory ("what just hit me?")
     python -m gvision --check-exclusion         is the overlay kept out of capture?
 """
@@ -72,6 +73,9 @@ async def _live(args: argparse.Namespace, bridge: Bridge, stop: asyncio.Event) -
         from gvision.world import WorldState
 
         world = WorldState()
+        text = await _text_watcher(args, bridge, source)
+        if text:
+            jobs.append(text.run(stop))
         if not args.no_memory:
             from gvision.memory import EventLog, FrameHistory
 
@@ -79,21 +83,37 @@ async def _live(args: argparse.Namespace, bridge: Bridge, stop: asyncio.Event) -
             events = EventLog(world)
             history.listeners.append(lambda f: events.update(f.ts))
             memory = (history, events)
-        jobs.append(_agent(args, bridge, world, stop, memory))
+        jobs.append(_agent(args, bridge, world, stop, text, memory))
     pipeline = LivePipeline(bridge, source, detector, settings, world=world)
     if memory:
         pipeline.frame_listeners.append(memory[0].offer)
     await asyncio.gather(pipeline.run(stop), *jobs)
 
 
-async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.Event, memory=None) -> None:
+async def _text_watcher(args: argparse.Namespace, bridge: Bridge, source):
+    """The background text watcher, or None when it is off or RapidOCR is missing."""
+    if args.no_text:
+        return None
+    from gvision.perception.ocr import RapidOcrEngine
+    from gvision.perception.text_watcher import TextWatcher
+
+    try:
+        engine = await asyncio.to_thread(RapidOcrEngine, args.ocr_side, args.ocr_threads)
+    except RuntimeError as e:
+        log.warning("not reading on-screen text: %s", e)
+        return None
+    log.info("text watcher: RapidOCR on the CPU, profiles in %s", args.text_profiles)
+    return TextWatcher(bridge, source, engine, profiles_dir=args.text_profiles)
+
+
+async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.Event, text=None, memory=None) -> None:
     from gvision.agent.agent import Agent
     from gvision.agent.qwen import QwenClient
     from gvision.agent.tools import ToolExecutor
     from gvision.assistant import Assistant
 
     qwen = QwenClient(args.qwen_url)
-    tools = ToolExecutor(world)
+    tools = ToolExecutor(world, text=text)
     narrator = None
     if memory:
         from gvision.memory import SITUATION_HINT, LookTool, Narrator, SharedQwen
@@ -166,6 +186,10 @@ def main() -> None:
     agent.add_argument("--voice", default="af_heart", help="Kokoro voice")
     agent.add_argument("--no-mic", action="store_true", help="type requests in the terminal instead of speaking")
     agent.add_argument("--no-tts", action="store_true", help="show answers without speaking them")
+    agent.add_argument("--no-text", action="store_true", help="don't read on-screen text")
+    agent.add_argument("--text-profiles", default="data/profiles", help="where learned text zones are saved per game")
+    agent.add_argument("--ocr-side", type=int, default=1280, help="text detection resolution (long side, px)")
+    agent.add_argument("--ocr-threads", type=int, default=4, help="CPU threads for RapidOCR")
     agent.add_argument("--no-memory", action="store_true", help="no frame history, look tool or narrator")
     agent.add_argument("--history-seconds", type=float, default=60.0, help="how much of the screen to remember")
     agent.add_argument("--narrate-every", type=float, default=25.0,
