@@ -174,3 +174,22 @@ test('update changes the command used by the next start', async () => {
   await svc.restart();
   assert.strictEqual(svc.detail, 'custom hint');
 });
+
+test('PID lists from PowerShell or lsof are parsed', () => {
+  const { parsePidList } = require('../services');
+  assert.deepStrictEqual(parsePidList('1234\r\n5678\r\n1234\r\n'), [1234, 5678]);
+  assert.deepStrictEqual(parsePidList('\r\n'), []);
+  assert.deepStrictEqual(parsePidList('Get-NetTCPConnection : error\r\n0\r\n'), []);
+});
+
+test('a process can be found by its command line',
+  { skip: process.platform !== 'win32' && !require('node:child_process').spawnSync('pgrep', ['-V']).pid },
+  async () => {
+    const { pidsByCommandLine } = require('../services');
+    const { spawn } = require('node:child_process');
+    const token = `gvision-test-${process.pid}-${Date.now()}`;
+    const child = spawn(process.execPath, ['-e', `setTimeout(() => {}, 30000) // ${token}`], { stdio: 'ignore' });
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepStrictEqual(pidsByCommandLine(token), [child.pid]);
+    child.kill();
+  });
