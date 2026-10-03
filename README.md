@@ -87,7 +87,7 @@ cd python
 python -m gvision --live --prompts "person,car,dog" --watch person
 ```
 
-Every tracked object gets a faint white outline and its label; objects whose
+Every tracked object gets a faint white contour; objects whose
 label is in `--watch` get the gold "target" glow once the tracker has seen
 them on 3 detector frames in a row. Add `--spotlight` to also dim the screen
 around them. `Ctrl+Shift+X` dismisses the current glows. Useful options:
@@ -123,17 +123,19 @@ Python process.
    ```
 
 Hold **Alt+3**, ask "where's the cow?" and let go. While you talk, a cyan
-voice wave at the bottom of the screen follows your voice; then it shows what
-was heard while Qwen thinks. Qwen calls `set_watch(["cow"])`, "cow" is added
-to YOLOE's prompts, and once the tracker confirms one it glows gold with the
-screen dimmed around it. The answer ("The cow is in the center.") is spoken by
-Kokoro with a gold wave and a caption. The glow and spotlight stay on for as
-long as the cow is tracked; only what you asked for is outlined
-(`--show-all` outlines every tracked object, for debugging). If nothing turns
-up within 1.5 s the answer says so and the watch stays on, so the glow appears
-as soon as one comes into view. Each new push-to-talk replaces the previous
-watch; `Ctrl+Shift+X` clears everything and stops speech. Ask "how many
-people are there?" for a count, or "stop highlighting" to clear.
+voice wave at the bottom of the screen follows your voice; bouncing dots show
+Qwen is thinking. Qwen calls `set_watch(["cow"])`, "cow" is added to YOLOE's
+prompts, and once the tracker confirms one, its contour glows gold with a
+see-through fill and the screen dims around it. Kokoro speaks the answer ("The
+cow is in the center.") with a gold wave. No text is drawn on the overlay: what
+was heard and the answer appear in the control panel. The glow and spotlight
+stay on for as long as the cow is tracked; only what you asked for is
+outlined (`--show-all` outlines every tracked object, for debugging). If
+nothing turns up within 1.5 s the answer says so and the watch stays on, so
+the glow appears as soon as one comes into view. Each new push-to-talk
+replaces the previous watch; `Ctrl+Shift+X` clears everything and stops
+speech. Ask "how many people are there?" for a count, or "stop highlighting"
+to clear.
 
 Useful options: `--ptt-key f8` (any key, or a combo like `ctrl+shift+space`), `--whisper-model small` (faster, less
 VRAM), `--asr nemotron` (needs `transformers`; much worse on accented English
