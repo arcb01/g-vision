@@ -6,7 +6,9 @@ the window), add what the tracker saw appear and leave, and ask Qwen's
 vision the player's question. Its answer is spoken as it is, which saves
 the agent's second round trip. When the question names a part of the screen
 ("bottom right"), a full-resolution crop of it from the newest frame goes
-along, so small HUD details like an ammo count stay readable.
+along, so small HUD details like an ammo count stay readable. For "right
+now" questions (seconds 0) the newest frame goes at 1600 px instead of the
+640 px history copy, where an inventory icon is only about a dozen pixels.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from typing import Any
 import httpx
 
 from gvision.agent.tools import ToolResult
-from gvision.memory.crop import crop_url, region_of
+from gvision.memory.crop import SCREEN_SIDE, crop_url, region_of
 from gvision.memory.events import EventLog
 from gvision.memory.history import FrameHistory
 from gvision.memory.narrator import image_part
@@ -74,6 +76,18 @@ class LookTool:
         self.screen = screen
         """``LatestFrame`` with the newest full-resolution frame, for crops."""
 
+    def _sharp(self) -> tuple[str, str] | None:
+        """The whole newest frame at up to 1600 px, with its size."""
+        image = self.screen.grab() if self.screen else None
+        if image is None:
+            return None
+        try:
+            url, (w, h) = crop_url(image, max_side=SCREEN_SIDE)
+        except Exception as e:  # the 640 px history frame still answers
+            log.warning("look: no sharp frame: %s", e)
+            return None
+        return url, f"{w}x{h}"
+
     def _crop(self, question: str) -> tuple[str, dict[str, Any]] | None:
         region = region_of(question)
         image = self.screen.grab() if region and self.screen else None
@@ -99,9 +113,11 @@ class LookTool:
         times = ", ".join(f"{max(0.0, now - f.ts):.0f} s ago" for f in frames)
         events = "; ".join(self.events.describe(now - seconds, now=now)) if self.events else ""
         crop = await asyncio.to_thread(self._crop, question) if question else None
+        sharp = await asyncio.to_thread(self._sharp) if not seconds else None
         text = PROMPT.format(times=times, events=events or "nothing", question=question or "What happened?",
                              crop=CROP_NOTE.format(region=crop[1]["region"]) if crop else "")
-        images = [image_part(f.data_url()) for f in frames] + ([image_part(crop[0])] if crop else [])
+        urls = [sharp[0]] if sharp else [f.data_url() for f in frames]
+        images = [image_part(u) for u in urls] + ([image_part(crop[0])] if crop else [])
         messages = [{"role": "user", "content": [{"type": "text", "text": text}, *images]}]
         try:
             reply = await self.qwen.chat(messages, max_tokens=80)
@@ -112,6 +128,8 @@ class LookTool:
         if not answer:
             return ToolResult({"error": "nothing seen"})
         content: dict[str, Any] = {"seen": answer, "frames": len(frames), "seconds": seconds}
+        if sharp:
+            content["screen"] = sharp[1]
         if crop:
             content["crop"] = crop[1]
         return ToolResult(content, speak=answer)
