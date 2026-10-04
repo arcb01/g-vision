@@ -75,10 +75,13 @@ test('a downloaded vision model runs as a second llama-server the backend looks 
   const backend = cmds.backend.args.join(' ');
   assert.ok(backend.includes('--qwen-url http://127.0.0.1:9000'));
   assert.ok(backend.includes('--vision-url http://127.0.0.1:9001'));
+  assert.ok(backend.includes('--vision-model Qwen3.5-4B-Q4_K_M'));
   assert.ok(!backend.includes('visionModel'));
   // "Same as the main Qwen" runs nothing extra.
   const same = resolveConfig({ fileConfig: { ...fileConfig, settings: { visionModel: 'same' } } });
   assert.strictEqual(same.vision, null);
   assert.ok(!('vision' in serviceCommands(same)));
   assert.ok(!serviceCommands(same).backend.args.includes('--vision-url'));
+  const sameArgs = serviceCommands(same).backend.args;
+  assert.strictEqual(sameArgs[sameArgs.indexOf('--vision-model') + 1], path.basename(same.llama.model, '.gguf'));
 });

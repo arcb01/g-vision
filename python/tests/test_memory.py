@@ -6,7 +6,7 @@ import pytest
 
 from gvision.agent.agent import Agent
 from gvision.agent.qwen import Reply
-from gvision.agent.tools import ToolExecutor
+from gvision.agent.tools import ToolExecutor, ToolResult
 from gvision.memory import EventLog, FrameHistory, LookTool, Narrator, Preempted, SharedQwen, StoredFrame
 from gvision.memory.look import HINT, SCHEMA
 from gvision.perception.capture import Frame
@@ -288,3 +288,14 @@ def test_look_adds_a_sharp_crop_when_the_question_names_a_region():
 
     result, _, parts = asyncio.run(ask("How many bullets do I have left?"))
     assert len([p for p in parts if p["type"] == "image_url"]) == 1 and "crop" not in result.content
+
+
+def test_the_look_step_names_the_vision_model():
+    tools = ToolExecutor(WorldState())
+    result = ToolResult({"answer": "a zombie"})
+    assert tools.step("look", {"question": "what hit me?"}, result, 1.0).title == "Qwen vision: look at recent frames"
+    tools.vision_model = "Qwen3.5-4B-Q4_K_M"
+    step = tools.step("look", {"question": "what hit me?"}, result, 1.0)
+    assert step.title == "Qwen vision: look at recent frames · Qwen3.5-4B-Q4_K_M"
+    assert step.detail.startswith("Model: Qwen3.5-4B-Q4_K_M\n")
+    assert "·" not in tools.step("query_state", {}, result, 1.0).title

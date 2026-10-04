@@ -163,6 +163,8 @@ class ToolExecutor:
         self.world = world
         self.find_timeout = find_timeout
         self.text = text
+        self.vision_model: str | None = None
+        """The model the look tool uses, named in the panel's step log."""
         self._extra_specs: list[dict[str, Any]] = []
         self.hints: list[str] = []
         """System prompt lines for registered tools."""
@@ -205,6 +207,9 @@ class ToolExecutor:
         """The panel log's line for one tool call: what went in, what came back."""
         kind, title = STEP_TITLES.get(name, ("tool", name))
         detail = f"{name}({brief(args, 200)})\n→ {brief(result.content)}"
+        if kind == "vision" and self.vision_model:
+            title = f"{title} · {self.vision_model}"
+            detail = f"Model: {self.vision_model}\n{detail}"
         if kind == "ocr" and self.text and self.text.timing_ms:
             detail += "\nRapidOCR " + ", ".join(f"{k} {v:.0f} ms" for k, v in self.text.timing_ms.items())
         crop = result.content.get("crop")

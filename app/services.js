@@ -132,7 +132,7 @@ function visionCommand(vision) {
 }
 
 // The Settings tab's choices become flags for the voice agent.
-function pythonCommand(py, llamaPort, settings = null, visionPort = null) {
+function pythonCommand(py, llamaPort, settings = null, visionPort = null, visionModel = null) {
   const args = ['-m', 'gvision', ...py.args];
   if (settings && py.args.includes('--agent')) args.push(...settingsArgs(settings, py.args));
   args.push('--port', String(py.port));
@@ -141,6 +141,9 @@ function pythonCommand(py, llamaPort, settings = null, visionPort = null) {
   }
   if (visionPort && py.args.includes('--agent') && !py.args.includes('--vision-url')) {
     args.push('--vision-url', `http://127.0.0.1:${visionPort}`);
+  }
+  if (visionModel && py.args.includes('--agent') && !py.args.includes('--vision-model')) {
+    args.push('--vision-model', visionModel);
   }
   return { name: 'backend', label: 'Python backend', exe: py.exe, args, cwd: py.dir, notFound: py.notFound };
 }
@@ -385,11 +388,18 @@ class Service extends EventEmitter {
   }
 }
 
+// The model file behind look, for the panel's step log: the vision server's
+// when one runs, else the main Qwen's.
+function visionModelName(cfg) {
+  const file = cfg.vision ? cfg.vision.model : cfg.llama.enabled ? cfg.llama.model : null;
+  return file ? path.basename(file).replace(/\.gguf$/i, '') : null;
+}
+
 // The command line for each service name, from a (re)loaded config.
 function serviceCommands(cfg) {
   const cmds = {
     qwen: llamaCommand(cfg.llama),
-    backend: pythonCommand(cfg.python, cfg.llama.port, cfg.settings, cfg.vision && cfg.vision.port),
+    backend: pythonCommand(cfg.python, cfg.llama.port, cfg.settings, cfg.vision && cfg.vision.port, visionModelName(cfg)),
   };
   if (cfg.vision) cmds.vision = visionCommand(cfg.vision);
   return cmds;
@@ -419,7 +429,7 @@ function createServices(cfg, { logDir = path.join(REPO_ROOT, 'logs') } = {}) {
     const port = cfg.python.port;
     services.push(
       new Service({
-        ...pythonCommand(cfg.python, cfg.llama.port, cfg.settings, cfg.vision && cfg.vision.port),
+        ...pythonCommand(cfg.python, cfg.llama.port, cfg.settings, cfg.vision && cfg.vision.port, visionModelName(cfg)),
         env: { PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
         isReady: () => portOpen(port),
         port,
