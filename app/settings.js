@@ -5,6 +5,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { VISION_MODELS } = require('./models');
 
 const SPEC = [
   {
@@ -40,6 +41,12 @@ const SPEC = [
   {
     key: 'sceneMemory', group: 'Vision', label: 'Scene memory', type: 'toggle', default: true, offFlag: '--no-memory',
     help: 'Remembers the last minute for "what just hit me?".',
+  },
+  {
+    key: 'visionModel', group: 'Vision', label: 'Vision model', type: 'choice', default: 'same',
+    choices: VISION_MODELS.map((m) => [m.id, m.label]),
+    details: Object.fromEntries(VISION_MODELS.map((m) => [m.id, m.summary])),
+    help: 'The model that looks at the screen (look back, situation notes). Questions are still routed by the 2B. A new pick downloads once, then the vision server and backend restart on their own.',
   },
   {
     key: 'narrateEvery', group: 'Vision', label: 'Situation notes every', type: 'number', default: 25,

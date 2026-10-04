@@ -299,3 +299,11 @@ input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; width: 18p
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Vision model download progress (Settings > Vision). */
+.vision-details { color: var(--text); opacity: 0.8; }
+.vision-progress { margin-top: 8px; max-width: 420px; }
+.vision-progress .bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.vision-progress .bar-fill { height: 100%; width: 0; background: var(--user); transition: width 0.3s; }
+.vision-progress .bar-row { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; font-size: 12px; color: var(--muted); }
+button.link { background: none; border: 0; padding: 0; color: var(--user); font: inherit; cursor: pointer; }

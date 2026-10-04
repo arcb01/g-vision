@@ -46,6 +46,7 @@ app/               Electron app: transparent overlay + control panel
   main.js          Owns the bridge connection, validates and forwards messages
   services.js      Starts and stops llama-server and the Python backend
   settings.js      The panel's Settings tab: saved in gvision.config.json, passed as backend flags
+  models.js        Vision models for Settings > Vision: download from Hugging Face, run as a second llama-server
   conversation.js  The panel's Log tab: questions, answers and screenshots in logs/conversation/
   src/overlay.*    PixiJS overlay: outlines, semantic colors, spotlight dimming
   src/panel.*      Control panel: Home, Log and Settings tabs

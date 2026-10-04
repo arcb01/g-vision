@@ -10,6 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { EventEmitter } = require('node:events');
+const { modelPaths } = require('./models');
 const { resolveSettings, settingsArgs } = require('./settings');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -80,16 +81,25 @@ function resolveConfig({ fileConfig = {}, mode = null, configDir = REPO_ROOT, en
   }
   const llamaDir = expandPath(cfg.llama.dir, configDir);
   const pythonDir = path.join(REPO_ROOT, 'python');
+  const settings = resolveSettings(fileConfig.settings);
+  const llama = {
+    ...cfg.llama,
+    dir: llamaDir,
+    server: expandPath(cfg.llama.server, llamaDir),
+    model: expandPath(cfg.llama.model, llamaDir),
+    mmproj: cfg.llama.mmproj ? expandPath(cfg.llama.mmproj, llamaDir) : null,
+  };
+  // A second llama-server for the look tool and situation notes, when the
+  // Settings tab picked a vision model other than the main Qwen.
+  // Until its files are downloaded, the main Qwen keeps doing the looking.
+  let paths = llama.enabled ? modelPaths(settings.visionModel, llamaDir) : null;
+  if (paths && !(fs.existsSync(paths.model) && fs.existsSync(paths.mmproj))) paths = null;
+  const vision = paths ? { ...llama, ...paths, id: settings.visionModel, port: llama.port + 1 } : null;
   return {
-    llama: {
-      ...cfg.llama,
-      dir: llamaDir,
-      server: expandPath(cfg.llama.server, llamaDir),
-      model: expandPath(cfg.llama.model, llamaDir),
-      mmproj: cfg.llama.mmproj ? expandPath(cfg.llama.mmproj, llamaDir) : null,
-    },
+    llama,
+    vision,
     python: { ...cfg.python, dir: pythonDir, ...resolvePython(cfg.python.exe, pythonDir, env) },
-    settings: resolveSettings(fileConfig.settings),
+    settings,
   };
 }
 
@@ -110,20 +120,27 @@ function loadConfig(mode = null) {
   return resolveConfig({ fileConfig, mode });
 }
 
-function llamaCommand(llama) {
+function llamaCommand(llama, name = 'qwen', label = 'Qwen (llama-server)') {
   const args = ['-m', llama.model];
   if (llama.mmproj) args.push('--mmproj', llama.mmproj);
   args.push(...llama.args, '--host', '127.0.0.1', '--port', String(llama.port));
-  return { name: 'qwen', label: 'Qwen (llama-server)', exe: llama.server, args, cwd: llama.dir };
+  return { name, label, exe: llama.server, args, cwd: llama.dir };
+}
+
+function visionCommand(vision) {
+  return llamaCommand(vision, 'vision', 'Vision Qwen (llama-server)');
 }
 
 // The Settings tab's choices become flags for the voice agent.
-function pythonCommand(py, llamaPort, settings = null) {
+function pythonCommand(py, llamaPort, settings = null, visionPort = null) {
   const args = ['-m', 'gvision', ...py.args];
   if (settings && py.args.includes('--agent')) args.push(...settingsArgs(settings, py.args));
   args.push('--port', String(py.port));
   if (py.args.includes('--agent') && !py.args.includes('--qwen-url')) {
     args.push('--qwen-url', `http://127.0.0.1:${llamaPort}`);
+  }
+  if (visionPort && py.args.includes('--agent') && !py.args.includes('--vision-url')) {
+    args.push('--vision-url', `http://127.0.0.1:${visionPort}`);
   }
   return { name: 'backend', label: 'Python backend', exe: py.exe, args, cwd: py.dir, notFound: py.notFound };
 }
@@ -370,32 +387,39 @@ class Service extends EventEmitter {
 
 // The command line for each service name, from a (re)loaded config.
 function serviceCommands(cfg) {
-  return {
+  const cmds = {
     qwen: llamaCommand(cfg.llama),
-    backend: pythonCommand(cfg.python, cfg.llama.port, cfg.settings),
+    backend: pythonCommand(cfg.python, cfg.llama.port, cfg.settings, cfg.vision && cfg.vision.port),
   };
+  if (cfg.vision) cmds.vision = visionCommand(cfg.vision);
+  return cmds;
+}
+
+function llamaService(cmd, llama, logDir) {
+  const { port } = llama;
+  return new Service({
+    ...cmd,
+    isReady: () => httpOk(`http://127.0.0.1:${port}/health`),
+    port,
+    match: `--port ${port}`,
+    readyTimeoutS: llama.readyTimeoutS,
+    logDir,
+  });
+}
+
+function visionService(cfg, logDir = path.join(REPO_ROOT, 'logs')) {
+  return llamaService(visionCommand(cfg.vision), cfg.vision, logDir);
 }
 
 function createServices(cfg, { logDir = path.join(REPO_ROOT, 'logs') } = {}) {
   const services = [];
-  if (cfg.llama.enabled) {
-    const port = cfg.llama.port;
-    services.push(
-      new Service({
-        ...llamaCommand(cfg.llama),
-        isReady: () => httpOk(`http://127.0.0.1:${port}/health`),
-        port,
-        match: 'llama-server',
-        readyTimeoutS: cfg.llama.readyTimeoutS,
-        logDir,
-      }),
-    );
-  }
+  if (cfg.llama.enabled) services.push(llamaService(llamaCommand(cfg.llama), cfg.llama, logDir));
+  if (cfg.vision) services.push(visionService(cfg, logDir));
   if (cfg.python.enabled) {
     const port = cfg.python.port;
     services.push(
       new Service({
-        ...pythonCommand(cfg.python, cfg.llama.port, cfg.settings),
+        ...pythonCommand(cfg.python, cfg.llama.port, cfg.settings, cfg.vision && cfg.vision.port),
         env: { PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
         isReady: () => portOpen(port),
         port,
@@ -427,4 +451,6 @@ module.exports = {
   pythonCommand,
   resolveConfig,
   serviceCommands,
+  visionCommand,
+  visionService,
 };
