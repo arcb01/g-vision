@@ -48,6 +48,13 @@ const VISION_MODELS = [
     repo: 'unsloth/Qwen3.5-9B-GGUF',
     files: [['Qwen3.5-9B-Q3_K_M.gguf', 4.67 * GB], ['mmproj-F16.gguf', 0.918 * GB]],
   },
+  {
+    id: 'glm-4.6v-flash-ud-q6kxl',
+    label: 'GLM-4.6V-Flash UD-Q6_K_XL',
+    summary: '10.7 GB download, about +11.5 GB VRAM. 9B, about 3-4x slower per look; watch game FPS.',
+    repo: 'unsloth/GLM-4.6V-Flash-GGUF',
+    files: [['GLM-4.6V-Flash-UD-Q6_K_XL.gguf', 8.89 * GB], ['mmproj-F16.gguf', 1.79 * GB]],
+  },
 ];
 
 const BY_ID = Object.fromEntries(VISION_MODELS.map((m) => [m.id, m]));
