@@ -55,6 +55,13 @@ const VISION_MODELS = [
     repo: 'unsloth/GLM-4.6V-Flash-GGUF',
     files: [['GLM-4.6V-Flash-UD-Q6_K_XL.gguf', 8.89 * GB], ['mmproj-F16.gguf', 1.79 * GB]],
   },
+  {
+    id: 'gemma-4-26b-a4b-ud-iq2m',
+    label: 'Gemma 4 26B-A4B UD-IQ2_M',
+    summary: '11.2 GB download, about +12 GB VRAM. Mixture of experts with 4B active, so about as fast per look as a 4B.',
+    repo: 'unsloth/gemma-4-26B-A4B-it-GGUF',
+    files: [['gemma-4-26B-A4B-it-UD-IQ2_M.gguf', 10.0 * GB], ['mmproj-F16.gguf', 1.19 * GB]],
+  },
 ];
 
 const BY_ID = Object.fromEntries(VISION_MODELS.map((m) => [m.id, m]));
