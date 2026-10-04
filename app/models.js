@@ -21,6 +21,13 @@ const VISION_MODELS = [
     files: [],
   },
   {
+    id: 'qwen3.5-2b-ud-q8kxl',
+    label: 'Qwen3.5 2B UD-Q8_K_XL',
+    summary: '3.5 GB download, about +3.8 GB VRAM. About as fast as the main 2B, a little sharper.',
+    repo: 'unsloth/Qwen3.5-2B-GGUF',
+    files: [['Qwen3.5-2B-UD-Q8_K_XL.gguf', 2.83 * GB], ['mmproj-F16.gguf', 0.668 * GB]],
+  },
+  {
     id: 'qwen3.8-27b-ud-iq3s',
     label: 'Qwen3.8 27B UD-IQ3_S',
     summary: '12.9 GB download, about +14 GB VRAM. Much slower per look (several seconds); tight on 24 GB with a game running.',
