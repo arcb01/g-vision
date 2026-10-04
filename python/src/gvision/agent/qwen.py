@@ -46,7 +46,7 @@ class QwenClient:
 
     async def chat(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, max_tokens: int = 200,
-        response_format: dict[str, Any] | None = None, think: bool = False,
+        response_format: dict[str, Any] | None = None, think: bool = False, think_budget: int | None = None,
     ) -> Reply:
         body: dict[str, Any] = {
             "messages": messages,
@@ -56,6 +56,10 @@ class QwenClient:
             # think=True is only for the vision server (Settings > Vision > Reasoning).
             "chat_template_kwargs": {"enable_thinking": think},
         }
+        if think and think_budget:
+            # llama-server closes the thinking after this many tokens and the
+            # model answers from what it has so far, in the same request.
+            body["thinking_budget_tokens"] = think_budget
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
