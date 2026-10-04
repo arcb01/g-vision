@@ -215,6 +215,8 @@ class ToolExecutor:
         screen = result.content.get("screen")
         if screen:
             detail += f"\nScreen sent at {screen} px"
+            if result.content.get("read_ahead"):
+                detail += ", read while you were talking"
         if result.content.get("thinking_cut"):
             detail += (f"\nReasoning on: still thinking after {result.content['thought']} words, "
                        "so it answered again without thinking")

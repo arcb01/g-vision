@@ -120,7 +120,7 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
 
     qwen = QwenClient(args.qwen_url)
     tools = ToolExecutor(world, text=text)
-    narrator = None
+    narrator = look = None
     if memory:
         from gvision.memory import SITUATION_HINT, LookTool, Narrator, SharedQwen
         from gvision.memory.look import HINT, SCHEMA
@@ -152,7 +152,7 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
         asr = await asyncio.to_thread(load_asr, args.asr, args.asr_device, args.whisper_model)
         recorder = Recorder()
     assistant = Assistant(bridge, world, Agent(qwen, world, tools, vision_only=args.vision_only), asr=asr, tts=tts, recorder=recorder,
-                          screen=screen)
+                          screen=screen, on_listen=look.warm if look else None)
     try:
         if args.no_mic:
             await assistant.read_stdin(stop)
