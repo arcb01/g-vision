@@ -148,7 +148,7 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
 
         asr = await asyncio.to_thread(load_asr, args.asr, args.asr_device, args.whisper_model)
         recorder = Recorder()
-    assistant = Assistant(bridge, world, Agent(qwen, world, tools), asr=asr, tts=tts, recorder=recorder,
+    assistant = Assistant(bridge, world, Agent(qwen, world, tools, vision_only=args.vision_only), asr=asr, tts=tts, recorder=recorder,
                           screen=screen)
     try:
         if args.no_mic:
@@ -194,6 +194,8 @@ def main() -> None:
                        help="llama-server with a separate vision model for look and situation notes")
     agent.add_argument("--vision-model", default=None,
                        help="name of the model behind look, shown in the panel's step log")
+    agent.add_argument("--vision-only", action="store_true",
+                       help="testing: skip routing and send every question to look (needs scene memory)")
     agent.add_argument("--ptt-key", default="alt+3", help="push-to-talk hotkey: alt+3, f8, ctrl+shift+space...")
     agent.add_argument("--asr", choices=["whisper", "nemotron"], default="whisper", help="speech-to-text model")
     agent.add_argument("--whisper-model", default="medium", help="faster-whisper size: small, medium...")

@@ -359,7 +359,7 @@ async function save(key, value, tick) {
 // situation notes without scene memory) are dimmed.
 function syncDependent() {
   const v = settings.values;
-  const dep = { whisperModel: v.asr === 'whisper', voice: v.speak, narrateEvery: v.sceneMemory };
+  const dep = { whisperModel: v.asr === 'whisper', voice: v.speak, narrateEvery: v.sceneMemory, visionOnly: v.sceneMemory };
   for (const [key, on] of Object.entries(dep)) {
     const f = document.querySelector(`[data-field="${key}"]`);
     if (f) f.classList.toggle('disabled', !on);
