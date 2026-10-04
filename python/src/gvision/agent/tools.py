@@ -212,6 +212,9 @@ class ToolExecutor:
             detail = f"Model: {self.vision_model}\n{detail}"
         if kind == "ocr" and self.text and self.text.timing_ms:
             detail += "\nRapidOCR " + ", ".join(f"{k} {v:.0f} ms" for k, v in self.text.timing_ms.items())
+        screen = result.content.get("screen")
+        if screen:
+            detail += f"\nScreen sent at {screen} px"
         crop = result.content.get("crop")
         if crop:
             detail += f"\nSharp crop of the {crop['region']}: {crop['size']} px at full resolution"

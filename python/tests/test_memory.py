@@ -281,13 +281,43 @@ def test_look_adds_a_sharp_crop_when_the_question_names_a_region():
         return result, tools.step("look", {"question": question}, result, 1.0), qwen.calls[0]["messages"][0]["content"]
 
     result, step, parts = asyncio.run(ask("How many bullets are on the bottom right?"))
-    assert len([p for p in parts if p["type"] == "image_url"]) == 2  # overview + crop
+    assert len([p for p in parts if p["type"] == "image_url"]) == 2  # sharp screen + crop
     assert "close-up of the bottom right" in parts[0]["text"]
     assert result.content["crop"] == {"region": "bottom right", "size": "1024x576"}
     assert "Sharp crop of the bottom right: 1024x576 px" in step.detail
 
     result, _, parts = asyncio.run(ask("How many bullets do I have left?"))
     assert len([p for p in parts if p["type"] == "image_url"]) == 1 and "crop" not in result.content
+
+
+def test_right_now_looks_send_the_screen_at_1600_px():
+    pytest.importorskip("cv2")
+    import base64
+
+    import cv2
+
+    from gvision.snapshot import LatestFrame
+
+    screen = LatestFrame()
+    screen.offer(Frame(ts=0.0, image=np.zeros((1440, 2560, 3), np.uint8)))
+    history = FrameHistory()
+    history.add(stored(__import__("time").time()))
+
+    async def ask(seconds):
+        qwen = FakeQwen(Reply("Two blue grenades."))
+        tools = ToolExecutor(WorldState())
+        tools.register(SCHEMA, LookTool(qwen, history, screen=screen), HINT)
+        result = await tools.run("look", {"question": "How many blue grenades?", "seconds": seconds})
+        images = [p for p in qwen.calls[0]["messages"][0]["content"] if p["type"] == "image_url"]
+        return result, tools.step("look", {}, result, 1.0), images
+
+    result, step, images = asyncio.run(ask(0))
+    assert result.content["screen"] == "1600x900" and "Screen sent at 1600x900 px" in step.detail
+    jpeg = base64.b64decode(images[0]["image_url"]["url"].split(",", 1)[1])
+    assert cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR).shape[:2] == (900, 1600)
+
+    result, _, images = asyncio.run(ask(10))  # "what just happened": the history frames as before
+    assert "screen" not in result.content and len(images) == 1
 
 
 def test_the_look_step_names_the_vision_model():

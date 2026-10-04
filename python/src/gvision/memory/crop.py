@@ -15,6 +15,8 @@ import numpy as np
 
 MAX_SIDE = 1280
 """Longest side of the crop sent to Qwen (~1000 image tokens at most)."""
+SCREEN_SIDE = 1600
+"""Longest side of the whole newest frame for "right now" looks (~1400 image tokens)."""
 JPEG_QUALITY = 90
 
 _ROW = {"top": "top", "upper": "top", "bottom": "bottom", "lower": "bottom"}
@@ -61,7 +63,9 @@ def region_of(question: str) -> tuple[str, tuple[float, float, float, float]] | 
     return name, (x0, y0, x1, y1)
 
 
-def crop_url(image: np.ndarray, box: tuple[float, float, float, float]) -> tuple[str, tuple[int, int]]:
+def crop_url(
+    image: np.ndarray, box: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0), max_side: int = MAX_SIDE
+) -> tuple[str, tuple[int, int]]:
     """BGR frame -> (JPEG data URL of the region at full resolution, its size)."""
     import cv2
 
@@ -69,8 +73,8 @@ def crop_url(image: np.ndarray, box: tuple[float, float, float, float]) -> tuple
     x0, y0, x1, y1 = box
     part = image[round(y0 * h):round(y1 * h), round(x0 * w):round(x1 * w)]
     ph, pw = part.shape[:2]
-    if max(ph, pw) > MAX_SIDE:
-        scale = MAX_SIDE / max(ph, pw)
+    if max(ph, pw) > max_side:
+        scale = max_side / max(ph, pw)
         part = cv2.resize(part, (max(1, round(pw * scale)), max(1, round(ph * scale))), interpolation=cv2.INTER_AREA)
     ok, jpeg = cv2.imencode(".jpg", part, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
     if not ok:
