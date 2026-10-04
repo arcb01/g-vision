@@ -41,6 +41,23 @@ const VISION_MODELS = [
     repo: 'unsloth/Qwen3.5-4B-GGUF',
     files: [['Qwen3.5-4B-Q8_0.gguf', 4.48 * GB], ['mmproj-F16.gguf', 0.672 * GB]],
   },
+  // Community distill of Qwen3.8 into the Qwen3.5 2B architecture. It ships
+  // without a vision file, so it borrows the stock 2B's mmproj: experimental,
+  // since the distill was trained on text only.
+  {
+    id: 'qwen3.8-2b-distill-q4',
+    label: 'Qwen3.8 2B Distill Q4_K_M (experimental)',
+    summary: '2.0 GB download, about +2.7 GB VRAM. Same speed as the 2B. Text-only distill using the 2B\'s vision file, so image answers may be worse.',
+    repo: 'empero-ai/Qwen3.8-2B-Distill-GGUF',
+    files: [['Qwen3.8-2B-Q4_K_M.gguf', 1.31 * GB], ['mmproj-F16.gguf', 0.668 * GB, 'unsloth/Qwen3.5-2B-GGUF']],
+  },
+  {
+    id: 'qwen3.8-2b-distill-q8',
+    label: 'Qwen3.8 2B Distill Q8_0 (experimental)',
+    summary: '2.7 GB download, about +3.5 GB VRAM. Same speed as the 2B. Text-only distill using the 2B\'s vision file, so image answers may be worse.',
+    repo: 'empero-ai/Qwen3.8-2B-Distill-GGUF',
+    files: [['Qwen3.8-2B-Q8_0.gguf', 2.08 * GB], ['mmproj-F16.gguf', 0.668 * GB, 'unsloth/Qwen3.5-2B-GGUF']],
+  },
   {
     id: 'qwen3.5-9b-q4',
     label: 'Qwen3.5 9B Q4_K_M (best quality)',
@@ -64,13 +81,14 @@ function modelPaths(id, llamaDir) {
   return { model: path.join(dir, m.files[0][0]), mmproj: path.join(dir, m.files[1][0]) };
 }
 
-// Files still to download: [{ name, url, dest, bytes }].
+// Files still to download: [{ name, url, dest, bytes }]. A file may name its
+// own repo (a vision file borrowed from another model).
 function missingFiles(id, llamaDir) {
   const m = BY_ID[id];
   if (!m) throw new Error(`unknown vision model "${id}"`);
   return m.files
-    .map(([name, bytes]) => ({
-      name, bytes, url: `https://huggingface.co/${m.repo}/resolve/main/${name}`, dest: path.join(folder(llamaDir, id), name),
+    .map(([name, bytes, repo = m.repo]) => ({
+      name, bytes, url: `https://huggingface.co/${repo}/resolve/main/${name}`, dest: path.join(folder(llamaDir, id), name),
     }))
     .filter((f) => !fs.existsSync(f.dest));
 }
