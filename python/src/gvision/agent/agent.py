@@ -81,6 +81,19 @@ def mentions_tracked(request: str, snapshot: dict[str, Any]) -> bool:
     return any(w.rstrip("s") in words for label in snapshot.get("counts", {}) for w in label.lower().split())
 
 
+QUESTION_WORDS = {"how", "what", "where", "which", "who", "is", "are", "do", "does", "can", "any", "whats"}
+CANT_SEE = re.compile(
+    r"\b(can't|cannot|can not|don't|do not|unable)\b.*\b(see|find|tell)\b|\bwatching for\b", re.IGNORECASE)
+
+
+def asks_about_screen(request: str, reply: str) -> bool:
+    """Whether a request Qwen answered without a tool still needed one: a
+    question, or a reply that just says it can't see."""
+    words = re.findall(r"[a-z]+", request.lower().replace("'", ""))
+    return request.rstrip().endswith("?") or bool(words and words[0] in QUESTION_WORDS) or bool(
+        CANT_SEE.search(reply or ""))
+
+
 class Agent:
     def __init__(self, qwen: Chat, world: WorldState, tools: ToolExecutor | None = None) -> None:
         self.qwen = qwen
@@ -121,6 +134,20 @@ class Agent:
             ok=bool(calls or reply.content),
         )]
         if not reply.tool_calls:
+            if self.tools.has("look") and asks_about_screen(request, reply.content):
+                # The 2B sometimes answers a screen question from the state
+                # alone ("I can't see any grenades"): let vision look.
+                steps.append(Step(kind="tool", title="Answered without looking: look instead",
+                                  detail=f"Qwen said {reply.content!r}"))
+                t = time.perf_counter()
+                args = {"question": request, "seconds": 0}
+                look = await self.tools.run("look", args)
+                steps.append(self.tools.step("look", args, look, (time.perf_counter() - t) * 1000))
+                if look.speak:
+                    latency["tools"] = (time.perf_counter() - t) * 1000
+                    steps.append(Step(kind="llm", title="Answer taken from the tool",
+                                      detail="no second Qwen call needed"))
+                    return Answer(look.speak, look.refs, ["look"], latency, steps=steps)
             return Answer(reply.content or "Sorry, I didn't get that.", latency_ms=latency, steps=steps)
 
         results: list[ToolResult] = []
