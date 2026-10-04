@@ -375,3 +375,26 @@ def test_thinking_left_in_the_answer_is_dropped():
     client = QwenClient("http://x")
     client._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     assert asyncio.run(client.chat([], think=True)).content == "Two."
+
+
+def test_thinking_that_runs_out_of_tokens_answers_again_without_thinking():
+    class LongThinker:
+        def __init__(self):
+            self.calls = []
+
+        async def chat(self, messages, tools=None, max_tokens=200, **kwargs):
+            self.calls.append({"max_tokens": max_tokens, **kwargs})
+            if kwargs.get("think"):
+                return Reply("", raw={"reasoning_content": "hmm " * 700})
+            return Reply("Two blue grenades.")
+
+    history = FrameHistory()
+    history.add(stored(__import__("time").time()))
+    qwen = LongThinker()
+    tools = ToolExecutor(WorldState())
+    tools.register(SCHEMA, LookTool(qwen, history, reasoning=True), HINT)
+    result = asyncio.run(tools.run("look", {"question": "How many blue grenades?", "seconds": 0}))
+    assert result.speak == "Two blue grenades."
+    assert qwen.calls == [{"max_tokens": 1024, "think": True}, {"max_tokens": 80}]
+    step = tools.step("look", {}, result, 1.0)
+    assert "still thinking after 700 words, so it answered again without thinking" in step.detail

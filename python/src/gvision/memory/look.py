@@ -127,9 +127,17 @@ class LookTool:
         urls = [sharp[0]] if sharp else [f.data_url() for f in frames]
         images = [image_part(u) for u in urls] + ([image_part(crop[0])] if crop else [])
         messages = [{"role": "user", "content": [{"type": "text", "text": text}, *images]}]
+        thought = None
+        cut = False
         try:
             if self.reasoning:
                 reply = await self.qwen.chat(messages, max_tokens=THINK_TOKENS, think=True)
+                thought = len(((reply.raw or {}).get("reasoning_content") or "").split())
+                # Still thinking when the tokens ran out: ask again without thinking
+                # rather than answer "nothing seen".
+                cut = not reply.content.strip()
+                if cut:
+                    reply = await self.qwen.chat(messages, max_tokens=80)
             else:
                 reply = await self.qwen.chat(messages, max_tokens=80)
         except httpx.HTTPError as e:
@@ -141,9 +149,10 @@ class LookTool:
         content: dict[str, Any] = {"seen": answer, "frames": len(frames), "seconds": seconds}
         if sharp:
             content["screen"] = sharp[1]
-        if self.reasoning:
-            thought = (reply.raw or {}).get("reasoning_content") or ""
-            content["thought"] = len(thought.split())
+        if thought is not None:
+            content["thought"] = thought
+        if cut:
+            content["thinking_cut"] = True
         if crop:
             content["crop"] = crop[1]
         return ToolResult(content, speak=answer)

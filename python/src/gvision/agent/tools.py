@@ -215,7 +215,10 @@ class ToolExecutor:
         screen = result.content.get("screen")
         if screen:
             detail += f"\nScreen sent at {screen} px"
-        if "thought" in result.content:
+        if result.content.get("thinking_cut"):
+            detail += (f"\nReasoning on: still thinking after {result.content['thought']} words, "
+                       "so it answered again without thinking")
+        elif "thought" in result.content:
             detail += f"\nReasoning on: thought for {result.content['thought']} words"
         crop = result.content.get("crop")
         if crop:
