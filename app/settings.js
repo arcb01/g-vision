@@ -49,6 +49,16 @@ const SPEC = [
     help: 'The model that looks at the screen (look back, situation notes). Questions are still routed by the 2B. A new pick downloads once, then the vision server and backend restart on their own.',
   },
   {
+    key: 'lookSize', group: 'Vision', label: 'Image resolution', type: 'choice', default: '1600', flag: '--look-size',
+    choices: [['640', '640 px (fastest)'], ['1024', '1024 px'], ['1280', '1280 px'], ['1600', '1600 px'], ['1920', '1920 px'], ['full', 'Full screen']],
+    help: 'How sharp the screen is when the vision model answers a question about right now. Sharper reads small icons and numbers better but takes longer.',
+  },
+  {
+    key: 'visionReasoning', group: 'Vision', label: 'Reasoning', type: 'toggle', default: false,
+    onFlag: '--vision-reasoning',
+    help: 'The vision model thinks before it answers. Can help with counting and telling items apart, but answers take several seconds longer. Needs a vision model other than "Same as the main Qwen".',
+  },
+  {
     key: 'visionOnly', group: 'Vision', label: 'Vision only (testing)', type: 'toggle', default: false,
     onFlag: '--vision-only',
     help: 'Skip routing: every question goes straight to the vision model, which answers. No highlights or text reading.',

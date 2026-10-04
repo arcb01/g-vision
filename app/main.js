@@ -303,6 +303,8 @@ app.whenReady().then(() => {
       if ('dimStrength' in changes) {
         sendToBridge(makeMessage('config_changed', { changes: { 'visual_effects.dim_strength': values.dimStrength } }));
       }
+      // The vision server's own flags change with it: restart it (and the backend) now.
+      if ('visionReasoning' in changes) syncVisionService();
       return { ok: true, values };
     } catch (err) {
       return { ok: false, error: err.message };

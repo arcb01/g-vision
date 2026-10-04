@@ -16,7 +16,8 @@ import numpy as np
 MAX_SIDE = 1280
 """Longest side of the crop sent to Qwen (~1000 image tokens at most)."""
 SCREEN_SIDE = 1600
-"""Longest side of the whole newest frame for "right now" looks (~1400 image tokens)."""
+"""Default longest side of the whole newest frame for "right now" looks (~1400 image tokens).
+Settings > Vision > Image resolution changes it."""
 JPEG_QUALITY = 90
 
 _ROW = {"top": "top", "upper": "top", "bottom": "bottom", "lower": "bottom"}

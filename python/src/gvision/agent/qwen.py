@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,6 +36,9 @@ class Reply:
     """The assistant message as returned, to append to the conversation."""
 
 
+THINK_END = re.compile(r"</think>")
+
+
 class QwenClient:
     def __init__(self, url: str = DEFAULT_URL, timeout: float = 30.0) -> None:
         self.url = url.rstrip("/")
@@ -42,14 +46,15 @@ class QwenClient:
 
     async def chat(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, max_tokens: int = 200,
-        response_format: dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None, think: bool = False,
     ) -> Reply:
         body: dict[str, Any] = {
             "messages": messages,
             "temperature": 0,
             "max_tokens": max_tokens,
             # Belt and braces with --reasoning off: the 2B model loops when thinking.
-            "chat_template_kwargs": {"enable_thinking": False},
+            # think=True is only for the vision server (Settings > Vision > Reasoning).
+            "chat_template_kwargs": {"enable_thinking": think},
         }
         if tools:
             body["tools"] = tools
@@ -68,7 +73,9 @@ class QwenClient:
                 log.warning("malformed tool arguments: %r", fn.get("arguments"))
                 args = {}
             calls.append(ToolCall(c.get("id") or f"call_{i}", fn.get("name", ""), args if isinstance(args, dict) else {}))
-        return Reply((msg.get("content") or "").strip(), calls, msg)
+        # A template that leaves the thinking in the answer: keep only what follows it.
+        content = THINK_END.split(msg.get("content") or "")[-1].strip()
+        return Reply(content, calls, msg)
 
     async def health(self) -> bool:
         try:

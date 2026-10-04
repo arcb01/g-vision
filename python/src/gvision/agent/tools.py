@@ -215,6 +215,8 @@ class ToolExecutor:
         screen = result.content.get("screen")
         if screen:
             detail += f"\nScreen sent at {screen} px"
+        if "thought" in result.content:
+            detail += f"\nReasoning on: thought for {result.content['thought']} words"
         crop = result.content.get("crop")
         if crop:
             detail += f"\nSharp crop of the {crop['region']}: {crop['size']} px at full resolution"

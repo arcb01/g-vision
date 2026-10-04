@@ -95,6 +95,8 @@ function resolveConfig({ fileConfig = {}, mode = null, configDir = REPO_ROOT, en
   let paths = llama.enabled ? modelPaths(settings.visionModel, llamaDir) : null;
   if (paths && !(fs.existsSync(paths.model) && fs.existsSync(paths.mmproj))) paths = null;
   const vision = paths ? { ...llama, ...paths, id: settings.visionModel, port: llama.port + 1 } : null;
+  // Settings > Vision > Reasoning: the vision server may think when look asks it to.
+  if (vision && settings.visionReasoning) vision.args = withoutReasoningOff(vision.args);
   return {
     llama,
     vision,
@@ -125,6 +127,15 @@ function llamaCommand(llama, name = 'qwen', label = 'Qwen (llama-server)') {
   if (llama.mmproj) args.push('--mmproj', llama.mmproj);
   args.push(...llama.args, '--host', '127.0.0.1', '--port', String(llama.port));
   return { name, label, exe: llama.server, args, cwd: llama.dir };
+}
+
+function withoutReasoningOff(args) {
+  const out = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--reasoning' && args[i + 1] === 'off') i++;
+    else out.push(args[i]);
+  }
+  return out;
 }
 
 function visionCommand(vision) {

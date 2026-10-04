@@ -126,9 +126,12 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
         from gvision.memory.look import HINT, SCHEMA
 
         history, events = memory
-        vision = QwenClient(args.vision_url) if args.vision_url else None
+        # Thinking takes longer than the 30 s default allows for.
+        vision = QwenClient(args.vision_url, timeout=90.0 if args.vision_reasoning else 30.0) if args.vision_url else None
         qwen = SharedQwen(qwen, vision=vision)
-        tools.register(SCHEMA, LookTool(qwen.looking, history, events, screen), HINT)
+        side = 0 if args.look_size == "640" else 1 << 16 if args.look_size == "full" else int(args.look_size)
+        look = LookTool(qwen.looking, history, events, screen, screen_side=side, reasoning=args.vision_reasoning and bool(args.vision_url))
+        tools.register(SCHEMA, look, HINT)
         tools.vision_model = args.vision_model
         if args.narrate_every > 0:
             tools.hints.append(SITUATION_HINT)
@@ -196,6 +199,10 @@ def main() -> None:
                        help="name of the model behind look, shown in the panel's step log")
     agent.add_argument("--vision-only", action="store_true",
                        help="testing: skip routing and send every question to look (needs scene memory)")
+    agent.add_argument("--look-size", choices=["640", "1024", "1280", "1600", "1920", "full"], default="1600",
+                       help="longest side of the screen look sends for right-now questions; 640 = the history frame")
+    agent.add_argument("--vision-reasoning", action="store_true",
+                       help="let the vision model think before it answers a look question (slower)")
     agent.add_argument("--ptt-key", default="alt+3", help="push-to-talk hotkey: alt+3, f8, ctrl+shift+space...")
     agent.add_argument("--asr", choices=["whisper", "nemotron"], default="whisper", help="speech-to-text model")
     agent.add_argument("--whisper-model", default="medium", help="faster-whisper size: small, medium...")
