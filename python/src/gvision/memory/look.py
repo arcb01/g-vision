@@ -7,8 +7,10 @@ vision the player's question. Its answer is spoken as it is, which saves
 the agent's second round trip. When the question names a part of the screen
 ("bottom right"), a full-resolution crop of it from the newest frame goes
 along, so small HUD details like an ammo count stay readable. For "right
-now" questions (seconds 0) the newest frame goes at 1600 px instead of the
-640 px history copy, where an inventory icon is only about a dozen pixels.
+now" questions (seconds 0) the newest frame goes at 1600 px (Settings >
+Vision > Image resolution) instead of the 640 px history copy, where an
+inventory icon is only about a dozen pixels. With Settings > Vision >
+Reasoning on, the vision model thinks before it answers.
 """
 
 from __future__ import annotations
@@ -30,6 +32,8 @@ log = logging.getLogger(__name__)
 
 MAX_SECONDS = 60.0
 FRAMES = 4
+THINK_TOKENS = 1024
+"""Room for the thinking plus the short answer when reasoning is on."""
 
 SCHEMA: dict[str, Any] = {
     "type": "function",
@@ -69,20 +73,24 @@ CROP_NOTE = (
 
 
 class LookTool:
-    def __init__(self, qwen: Any, history: FrameHistory, events: EventLog | None = None, screen: Any = None) -> None:
+    def __init__(self, qwen: Any, history: FrameHistory, events: EventLog | None = None, screen: Any = None,
+                 screen_side: int = SCREEN_SIDE, reasoning: bool = False) -> None:
         self.qwen = qwen
         self.history = history
         self.events = events
         self.screen = screen
         """``LatestFrame`` with the newest full-resolution frame, for crops."""
+        self.screen_side = screen_side
+        """Longest side of the "right now" frame; 0 keeps the 640 px history frame."""
+        self.reasoning = reasoning
 
     def _sharp(self) -> tuple[str, str] | None:
-        """The whole newest frame at up to 1600 px, with its size."""
-        image = self.screen.grab() if self.screen else None
+        """The whole newest frame at up to ``screen_side`` px, with its size."""
+        image = self.screen.grab() if self.screen and self.screen_side else None
         if image is None:
             return None
         try:
-            url, (w, h) = crop_url(image, max_side=SCREEN_SIDE)
+            url, (w, h) = crop_url(image, max_side=self.screen_side)
         except Exception as e:  # the 640 px history frame still answers
             log.warning("look: no sharp frame: %s", e)
             return None
@@ -120,7 +128,10 @@ class LookTool:
         images = [image_part(u) for u in urls] + ([image_part(crop[0])] if crop else [])
         messages = [{"role": "user", "content": [{"type": "text", "text": text}, *images]}]
         try:
-            reply = await self.qwen.chat(messages, max_tokens=80)
+            if self.reasoning:
+                reply = await self.qwen.chat(messages, max_tokens=THINK_TOKENS, think=True)
+            else:
+                reply = await self.qwen.chat(messages, max_tokens=80)
         except httpx.HTTPError as e:
             log.error("look: Qwen request failed: %s", e)
             return ToolResult({"error": "could not look at the screen"})
@@ -130,6 +141,9 @@ class LookTool:
         content: dict[str, Any] = {"seen": answer, "frames": len(frames), "seconds": seconds}
         if sharp:
             content["screen"] = sharp[1]
+        if self.reasoning:
+            thought = (reply.raw or {}).get("reasoning_content") or ""
+            content["thought"] = len(thought.split())
         if crop:
             content["crop"] = crop[1]
         return ToolResult(content, speak=answer)

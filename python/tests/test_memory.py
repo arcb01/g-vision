@@ -329,3 +329,49 @@ def test_the_look_step_names_the_vision_model():
     assert step.title == "Qwen vision: look at recent frames · Qwen3.5-4B-Q4_K_M"
     assert step.detail.startswith("Model: Qwen3.5-4B-Q4_K_M\n")
     assert "·" not in tools.step("query_state", {}, result, 1.0).title
+
+
+def test_reasoning_and_image_resolution_settings_reach_look():
+    pytest.importorskip("cv2")
+    from gvision.snapshot import LatestFrame
+
+    screen = LatestFrame()
+    screen.offer(Frame(ts=0.0, image=np.zeros((1440, 2560, 3), np.uint8)))
+    history = FrameHistory()
+    history.add(stored(__import__("time").time()))
+
+    class ThinkingQwen:
+        def __init__(self):
+            self.kwargs = None
+
+        async def chat(self, messages, tools=None, max_tokens=200, **kwargs):
+            self.kwargs = {"max_tokens": max_tokens, **kwargs}
+            return Reply("Two blue grenades.", raw={"reasoning_content": "one two three"})
+
+    async def ask(**settings):
+        qwen = ThinkingQwen()
+        tools = ToolExecutor(WorldState())
+        tools.register(SCHEMA, LookTool(qwen, history, screen=screen, **settings), HINT)
+        result = await tools.run("look", {"question": "How many blue grenades?", "seconds": 0})
+        return result, tools.step("look", {}, result, 1.0), qwen.kwargs
+
+    result, step, kwargs = asyncio.run(ask(reasoning=True, screen_side=1024))
+    assert kwargs == {"max_tokens": 1024, "think": True}
+    assert result.content["thought"] == 3 and "Reasoning on: thought for 3 words" in step.detail
+    assert result.content["screen"] == "1024x576"
+
+    result, _, kwargs = asyncio.run(ask(screen_side=0))  # 640 px: the history frame, no thinking
+    assert kwargs == {"max_tokens": 80} and "screen" not in result.content and "thought" not in result.content
+
+
+def test_thinking_left_in_the_answer_is_dropped():
+    import httpx
+
+    from gvision.agent.qwen import QwenClient
+
+    def handler(request):
+        return httpx.Response(200, json={"choices": [{"message": {"content": "<think>hmm</think>\n\nTwo."}}]})
+
+    client = QwenClient("http://x")
+    client._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    assert asyncio.run(client.chat([], think=True)).content == "Two."
