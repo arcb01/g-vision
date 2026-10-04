@@ -127,7 +127,7 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
 
         history, events = memory
         qwen = SharedQwen(qwen)
-        tools.register(SCHEMA, LookTool(qwen, history, events), HINT)
+        tools.register(SCHEMA, LookTool(qwen, history, events, screen), HINT)
         if args.narrate_every > 0:
             tools.hints.append(SITUATION_HINT)
             narrator = asyncio.create_task(Narrator(qwen, history, events, world, args.narrate_every).run(stop))
