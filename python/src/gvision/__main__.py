@@ -129,6 +129,7 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
         vision = QwenClient(args.vision_url) if args.vision_url else None
         qwen = SharedQwen(qwen, vision=vision)
         tools.register(SCHEMA, LookTool(qwen.looking, history, events, screen), HINT)
+        tools.vision_model = args.vision_model
         if args.narrate_every > 0:
             tools.hints.append(SITUATION_HINT)
             narrator = asyncio.create_task(Narrator(qwen, history, events, world, args.narrate_every).run(stop))
@@ -191,6 +192,8 @@ def main() -> None:
     agent.add_argument("--qwen-url", default="http://127.0.0.1:8080", help="llama-server running Qwen3.5-2B")
     agent.add_argument("--vision-url", default=None,
                        help="llama-server with a separate vision model for look and situation notes")
+    agent.add_argument("--vision-model", default=None,
+                       help="name of the model behind look, shown in the panel's step log")
     agent.add_argument("--ptt-key", default="alt+3", help="push-to-talk hotkey: alt+3, f8, ctrl+shift+space...")
     agent.add_argument("--asr", choices=["whisper", "nemotron"], default="whisper", help="speech-to-text model")
     agent.add_argument("--whisper-model", default="medium", help="faster-whisper size: small, medium...")
