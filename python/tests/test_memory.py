@@ -213,7 +213,7 @@ def test_what_just_hit_me_end_to_end():
     assert "look back in time" not in first["messages"][0]["content"]
     assert "look" in {t["function"]["name"] for t in first["tools"]}
     parts = look["messages"][0]["content"]
-    assert "skeleton appeared top right" in parts[0]["text"]
+    assert "skeleton appeared top right" in parts[-1]["text"]
     assert len([p for p in parts if p["type"] == "image_url"]) == 4
 
 
@@ -282,7 +282,7 @@ def test_look_adds_a_sharp_crop_when_the_question_names_a_region():
 
     result, step, parts = asyncio.run(ask("How many bullets are on the bottom right?"))
     assert len([p for p in parts if p["type"] == "image_url"]) == 2  # sharp screen + crop
-    assert "close-up of the bottom right" in parts[0]["text"]
+    assert "close-up of the bottom right" in parts[-1]["text"]
     assert result.content["crop"] == {"region": "bottom right", "size": "1024x576"}
     assert "Sharp crop of the bottom right: 1024x576 px" in step.detail
 
@@ -398,3 +398,39 @@ def test_thinking_that_runs_out_of_tokens_answers_again_without_thinking():
     assert qwen.calls == [{"max_tokens": 1024, "think": True}, {"max_tokens": 80}]
     step = tools.step("look", {}, result, 1.0)
     assert "still thinking after 700 words, so it answered again without thinking" in step.detail
+
+
+def test_push_to_talk_press_reads_the_screen_ahead_for_the_question():
+    pytest.importorskip("cv2")
+    from gvision.snapshot import LatestFrame
+
+    screen = LatestFrame()
+    screen.offer(Frame(ts=0.0, image=np.zeros((1440, 2560, 3), np.uint8)))
+    history = FrameHistory()
+    history.add(stored(__import__("time").time()))
+
+    class Recording:
+        def __init__(self):
+            self.calls = []
+
+        async def chat(self, messages, tools=None, max_tokens=200, **kwargs):
+            self.calls.append((messages[0]["content"], max_tokens))
+            return Reply("Two blue grenades." if max_tokens > 1 else "")
+
+    async def run():
+        qwen = Recording()
+        tools = ToolExecutor(WorldState())
+        look = LookTool(qwen, history, screen=screen)
+        tools.register(SCHEMA, look, HINT)
+        look.warm()  # push-to-talk press
+        screen.offer(Frame(ts=1.0, image=np.full((1440, 2560, 3), 255, np.uint8)))  # the screen moves on
+        result = await tools.run("look", {"question": "How many blue grenades?", "seconds": 0})
+        return qwen.calls, result, tools.step("look", {}, result, 1.0)
+
+    calls, result, step = asyncio.run(run())
+    (ahead, ahead_tokens), (asked, _) = calls
+    assert ahead_tokens == 1 and [p["type"] for p in ahead] == ["image_url"]
+    # Same image first, so llama-server reuses what it read at the press.
+    assert asked[0] == ahead[0] and asked[-1]["type"] == "text"
+    assert result.content["read_ahead"] is True
+    assert "Screen sent at 1600x900 px, read while you were talking" in step.detail

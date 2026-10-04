@@ -53,6 +53,7 @@ class Assistant:
         self, bridge: Bridge, world: WorldState, agent: Agent,
         asr: SpeechToText | None = None, tts: KokoroTTS | None = None, recorder: Recorder | None = None,
         screen: LatestFrame | None = None, encode_fn: Encode = encode,
+        on_listen: Callable[[], None] | None = None,
     ) -> None:
         self.bridge = bridge
         self.world = world
@@ -62,6 +63,8 @@ class Assistant:
         self.recorder = recorder
         self.screen = screen
         self._encode = encode_fn
+        self._on_listen = on_listen
+        """Called on push-to-talk press: look reads the screen ahead."""
         self._asked: tuple[float, str, object] | None = None
         """(time, "voice" or "typed", screen image) of the question being answered."""
         self._logging: set[asyncio.Task] = set()
@@ -92,6 +95,8 @@ class Assistant:
         self.world.clear_watch()
         self.bridge.send(ClearMsg(reason="push-to-talk"))
         self.bridge.send(VoiceMsg(state="listening"))
+        if self._on_listen:
+            self._on_listen()
         if self.recorder:
             self.recorder.start()
             self._meter = asyncio.create_task(self._send_mic_levels())

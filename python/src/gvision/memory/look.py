@@ -11,11 +11,17 @@ now" questions (seconds 0) the newest frame goes at 1600 px (Settings >
 Vision > Image resolution) instead of the 640 px history copy, where an
 inventory icon is only about a dozen pixels. With Settings > Vision >
 Reasoning on, the vision model thinks before it answers.
+
+``warm`` runs on push-to-talk press: it grabs that frame and has the vision
+server read it while the player is still talking (llama-server keeps the
+prompt cache), so a right-now look only pays for the question and answer.
+The image goes before the text in the prompt so that prefix is shared.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from typing import Any
@@ -32,6 +38,8 @@ log = logging.getLogger(__name__)
 
 MAX_SECONDS = 60.0
 FRAMES = 4
+WARM_MAX_AGE = 30.0
+"""Seconds a frame read at push-to-talk press stays usable for the question."""
 THINK_TOKENS = 1024
 """Room for the thinking plus the short answer when reasoning is on."""
 
@@ -83,6 +91,36 @@ class LookTool:
         self.screen_side = screen_side
         """Longest side of the "right now" frame; 0 keeps the 640 px history frame."""
         self.reasoning = reasoning
+        self._warm: tuple[float, str, str] | None = None
+        """(time, data URL, size) of the frame read at push-to-talk press."""
+        self._warming: asyncio.Task | None = None
+
+    def warm(self) -> None:
+        """Push-to-talk press: start reading the screen before the question arrives."""
+        if self._warming and not self._warming.done():
+            self._warming.cancel()
+        self._warm = None
+        if self.screen and self.screen_side:
+            self._warming = asyncio.ensure_future(self._read_ahead())
+
+    async def _read_ahead(self) -> None:
+        sharp = await asyncio.to_thread(self._sharp)
+        if sharp is None:
+            return
+        self._warm = (time.time(), *sharp)
+        try:  # one token: only the image's prompt cache matters
+            await self.qwen.chat([{"role": "user", "content": [image_part(sharp[0])]}], max_tokens=1)
+        except httpx.HTTPError as e:
+            log.warning("look: reading ahead failed: %s", e)
+
+    async def _warmed(self) -> tuple[str, str] | None:
+        """The frame read at press, once its prompt is cached, if still fresh."""
+        if self._warming:
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._warming
+        if self._warm and time.time() - self._warm[0] <= WARM_MAX_AGE:
+            return self._warm[1], self._warm[2]
+        return None
 
     def _sharp(self) -> tuple[str, str] | None:
         """The whole newest frame at up to ``screen_side`` px, with its size."""
@@ -121,12 +159,13 @@ class LookTool:
         times = ", ".join(f"{max(0.0, now - f.ts):.0f} s ago" for f in frames)
         events = "; ".join(self.events.describe(now - seconds, now=now)) if self.events else ""
         crop = await asyncio.to_thread(self._crop, question) if question else None
-        sharp = await asyncio.to_thread(self._sharp) if not seconds else None
+        warmed = await self._warmed() if not seconds else None
+        sharp = warmed or (await asyncio.to_thread(self._sharp) if not seconds else None)
         text = PROMPT.format(times=times, events=events or "nothing", question=question or "What happened?",
                              crop=CROP_NOTE.format(region=crop[1]["region"]) if crop else "")
         urls = [sharp[0]] if sharp else [f.data_url() for f in frames]
         images = [image_part(u) for u in urls] + ([image_part(crop[0])] if crop else [])
-        messages = [{"role": "user", "content": [{"type": "text", "text": text}, *images]}]
+        messages = [{"role": "user", "content": [*images, {"type": "text", "text": text}]}]
         thought = None
         cut = False
         try:
@@ -149,6 +188,8 @@ class LookTool:
         content: dict[str, Any] = {"seen": answer, "frames": len(frames), "seconds": seconds}
         if sharp:
             content["screen"] = sharp[1]
+        if warmed:
+            content["read_ahead"] = True
         if thought is not None:
             content["thought"] = thought
         if cut:
