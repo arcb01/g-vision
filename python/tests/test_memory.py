@@ -121,6 +121,24 @@ def test_narrator_waits_until_the_player_is_done():
     assert background.content == "narrate"
 
 
+def test_a_vision_model_takes_the_look_tool_and_the_narrator():
+    async def run():
+        main, vision = SlowQwen(), SlowQwen()
+        shared = SharedQwen(main, quiet_s=0.0, vision=vision)
+        background = asyncio.create_task(shared.background_chat([{"role": "user", "content": "narrate"}]))
+        await asyncio.sleep(0.05)
+        # A look preempts the narrator like any player request.
+        await shared.looking.chat([{"role": "user", "content": "look"}])
+        with pytest.raises(Preempted):
+            await background
+        await shared.chat([{"role": "user", "content": "route"}])
+        return main.started, vision.started
+
+    main, vision = asyncio.run(run())
+    assert main == ["route"]
+    assert vision == ["narrate", "look"]
+
+
 class JsonQwen:
     def __init__(self, notes):
         self.notes = notes

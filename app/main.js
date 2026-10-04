@@ -14,7 +14,8 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, screen, shell } = require('electron');
 const { parseMessage, validateMessage, makeMessage } = require('./protocol');
-const { CONFIG_FILE, REPO_ROOT, createServices, loadConfig, serviceCommands } = require('./services');
+const { CONFIG_FILE, REPO_ROOT, createServices, loadConfig, serviceCommands, visionService } = require('./services');
+const models = require('./models');
 const { ConversationLog } = require('./conversation');
 const { SPEC, readFile, resolveSettings, saveSettings } = require('./settings');
 
@@ -153,12 +154,80 @@ function servicesState() {
   return { managed: MANAGE_SERVICES, error: null, services: services.map((s) => s.info()) };
 }
 
+function watchService(s) {
+  s.on('change', () => broadcast('gvision:services', servicesState()));
+}
+
 function startServices() {
   if (!MANAGE_SERVICES || !config) return;
   services = createServices(config, { logDir: LOG_DIR });
   for (const s of services) {
-    s.on('change', () => broadcast('gvision:services', servicesState()));
+    watchService(s);
     s.start().catch((err) => console.error(`[${s.name}]`, err));
+  }
+}
+
+// Vision model picker (Settings > Vision): download the files if missing,
+// save the choice, then start, swap or stop the second llama-server and
+// restart the backend so look and the situation notes use it.
+let visionDownload = null;
+
+function llamaDir() {
+  return (config || loadConfig(MODE)).llama.dir;
+}
+
+function visionModels() {
+  let dir = null;
+  try {
+    dir = llamaDir();
+  } catch {
+    // No usable config: nothing reads as downloaded.
+  }
+  return models.VISION_MODELS.map((m) => ({
+    id: m.id,
+    downloaded: !m.files.length || (dir !== null && models.missingFiles(m.id, dir).length === 0),
+  }));
+}
+
+async function syncVisionService() {
+  if (!MANAGE_SERVICES || !config) return;
+  const cfg = loadConfig(MODE);
+  const i = services.findIndex((x) => x.name === 'vision');
+  if (i >= 0) {
+    const old = services[i];
+    services.splice(i, 1);
+    await old.stop();
+  }
+  if (cfg.vision) {
+    const s = visionService(cfg, LOG_DIR);
+    watchService(s);
+    services.splice(Math.max(0, services.findIndex((x) => x.name === 'backend')), 0, s);
+    s.start().catch((err) => s._set('failed', err.message));
+  }
+  broadcast('gvision:services', servicesState());
+  serviceAction('backend', 'restart');
+}
+
+async function useVisionModel(id) {
+  if (!models.VISION_MODELS.some((m) => m.id === id)) return { ok: false, error: `unknown vision model "${id}"` };
+  if (visionDownload) visionDownload.abort();
+  const controller = new AbortController();
+  visionDownload = controller;
+  try {
+    if (id !== 'same') {
+      await models.download(id, llamaDir(), {
+        signal: controller.signal,
+        onProgress: (p) => toPanel('gvision:vision-download', { id, ...p }),
+      });
+    }
+    if (controller.signal.aborted) return { ok: false, error: 'cancelled' };
+    const values = saveSettings(CONFIG_FILE, { visionModel: id });
+    await syncVisionService();
+    return { ok: true, values, models: visionModels() };
+  } catch (err) {
+    return { ok: false, error: controller.signal.aborted ? 'cancelled' : err.message, models: visionModels() };
+  } finally {
+    if (visionDownload === controller) visionDownload = null;
   }
 }
 
@@ -239,6 +308,9 @@ app.whenReady().then(() => {
       return { ok: false, error: err.message };
     }
   });
+  ipcMain.handle('gvision:vision-models', () => visionModels());
+  ipcMain.handle('gvision:use-vision-model', (_event, id) => useVisionModel(id));
+  ipcMain.handle('gvision:cancel-vision-download', () => visionDownload && visionDownload.abort());
   ipcMain.handle('gvision:open-logs', () => {
     fs.mkdirSync(LOG_DIR, { recursive: true });
     return shell.openPath(LOG_DIR);

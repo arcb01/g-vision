@@ -18,4 +18,8 @@ contextBridge.exposeInMainWorld('gvision', {
   clearLog: () => ipcRenderer.invoke('gvision:clear-log'),
   getSettings: () => ipcRenderer.invoke('gvision:get-settings'),
   saveSettings: (changes) => ipcRenderer.invoke('gvision:save-settings', changes),
+  getVisionModels: () => ipcRenderer.invoke('gvision:vision-models'),
+  useVisionModel: (id) => ipcRenderer.invoke('gvision:use-vision-model', id),
+  cancelVisionDownload: () => ipcRenderer.invoke('gvision:cancel-vision-download'),
+  onVisionDownload: (cb) => ipcRenderer.on('gvision:vision-download', (_e, p) => cb(p)),
 });

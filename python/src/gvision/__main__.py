@@ -126,13 +126,16 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
         from gvision.memory.look import HINT, SCHEMA
 
         history, events = memory
-        qwen = SharedQwen(qwen)
-        tools.register(SCHEMA, LookTool(qwen, history, events, screen), HINT)
+        vision = QwenClient(args.vision_url) if args.vision_url else None
+        qwen = SharedQwen(qwen, vision=vision)
+        tools.register(SCHEMA, LookTool(qwen.looking, history, events, screen), HINT)
         if args.narrate_every > 0:
             tools.hints.append(SITUATION_HINT)
             narrator = asyncio.create_task(Narrator(qwen, history, events, world, args.narrate_every).run(stop))
     if not await qwen.health():
         log.warning("no llama-server at %s yet; start it (see README) and requests will work", args.qwen_url)
+    if memory and args.vision_url:
+        log.info("vision model: look and situation notes use %s", args.vision_url)
     tts = asr = recorder = None
     if not args.no_tts:
         from gvision.audio.tts import KokoroTTS
@@ -186,6 +189,8 @@ def main() -> None:
     agent = parser.add_argument_group("agent (with --live)")
     agent.add_argument("--agent", action="store_true", help="push-to-talk questions answered by Qwen with glow + voice")
     agent.add_argument("--qwen-url", default="http://127.0.0.1:8080", help="llama-server running Qwen3.5-2B")
+    agent.add_argument("--vision-url", default=None,
+                       help="llama-server with a separate vision model for look and situation notes")
     agent.add_argument("--ptt-key", default="alt+3", help="push-to-talk hotkey: alt+3, f8, ctrl+shift+space...")
     agent.add_argument("--asr", choices=["whisper", "nemotron"], default="whisper", help="speech-to-text model")
     agent.add_argument("--whisper-model", default="medium", help="faster-whisper size: small, medium...")

@@ -366,7 +366,67 @@ function syncDependent() {
   }
 }
 
+// Vision model picker: picking a model downloads it if needed (in the main
+// process, with progress here), then the app restarts what uses it.
+let visionModels = [];
+let visionBusy = false;
+
+function gb(bytes) {
+  return `${(bytes / 1e9).toFixed(1)} GB`;
+}
+
+function renderVisionDetails() {
+  const spec = settings.spec.find((s) => s.key === 'visionModel');
+  const box = $('#vision-details');
+  if (!spec || !box) return;
+  const sel = document.querySelector('[data-field="visionModel"] select');
+  const id = sel ? sel.value : settings.values.visionModel;
+  const m = visionModels.find((x) => x.id === id);
+  const state = !m || id === 'same' || visionBusy ? '' : m.downloaded ? ' Downloaded.' : ' Not downloaded yet: picking it downloads it.';
+  box.textContent = `${spec.details[id] || ''}${state}`;
+}
+
+function visionProgress(p) {
+  const bar = $('#vision-progress');
+  if (!bar) return;
+  bar.hidden = !p;
+  if (!p) return;
+  bar.querySelector('.bar-fill').style.width = `${p.total ? (p.done / p.total) * 100 : 0}%`;
+  bar.querySelector('.bar-text').textContent = p.text || `Downloading ${p.file}: ${gb(p.done)} of ${gb(p.total)}`;
+}
+
+function visionPicker(spec, value, tick) {
+  const sel = el('select', { 'aria-label': spec.label }, ...spec.choices.map(([v, label]) => el('option', { value: v, text: label })));
+  sel.value = value;
+  sel.disabled = visionBusy;
+  sel.addEventListener('change', async () => {
+    visionBusy = true;
+    sel.disabled = true;
+    renderVisionDetails();
+    visionProgress({ done: 0, total: 0, text: sel.value === 'same' ? 'Switching back to the main Qwen…' : 'Starting…' });
+    const r = await window.gvision.useVisionModel(sel.value);
+    visionBusy = false;
+    sel.disabled = false;
+    visionProgress(null);
+    if (r.models) visionModels = r.models;
+    if (!r.ok) {
+      if (r.error !== 'cancelled') toast(r.error, true);
+      sel.value = settings.values.visionModel;
+      renderVisionDetails();
+      return;
+    }
+    settings.values = r.values;
+    tick.classList.add('show');
+    clearTimeout(tick.timer);
+    tick.timer = setTimeout(() => tick.classList.remove('show'), 1400);
+    renderVisionDetails();
+    toast('Vision model switched; restarting the vision server and the backend');
+  });
+  return sel;
+}
+
 function control(spec, value, tick) {
+  if (spec.key === 'visionModel') return visionPicker(spec, value, tick);
   switch (spec.type) {
     case 'toggle': {
       const sw = el('button', { class: 'switch', role: 'switch', 'aria-checked': String(value), 'aria-label': spec.label });
@@ -468,10 +528,19 @@ function renderSettings() {
       return el('div', { class: 'field', 'data-field': spec.key },
         el('div', {},
           el('div', { class: 'field-label' }, spec.label, tick),
-          el('div', { class: 'field-help', text: spec.help })),
+          el('div', { class: 'field-help', text: spec.help }),
+          ...(spec.key === 'visionModel' ? [
+            el('div', { class: 'field-help vision-details', id: 'vision-details' }),
+            el('div', { class: 'vision-progress', id: 'vision-progress', hidden: true },
+              el('div', { class: 'bar' }, el('div', { class: 'bar-fill' })),
+              el('div', { class: 'bar-row' },
+                el('span', { class: 'bar-text' }),
+                el('button', { class: 'link', text: 'Cancel', onclick: () => window.gvision.cancelVisionDownload() }))),
+          ] : [])),
         control(spec, settings.values[spec.key], tick));
     }))));
   syncDependent();
+  renderVisionDetails();
 }
 
 $('#restart-backend').addEventListener('click', () => {
@@ -487,6 +556,13 @@ window.gvision.onConnection(setConnection);
 window.gvision.getConnection().then(setConnection);
 window.gvision.onServices(renderServices);
 window.gvision.getServices().then(renderServices);
+window.gvision.getVisionModels().then((m) => {
+  visionModels = m;
+  if (settings) renderVisionDetails();
+});
+window.gvision.onVisionDownload((p) => {
+  if (visionBusy) visionProgress(p);
+});
 window.gvision.getSettings().then((s) => {
   settings = s;
   renderSettings();
