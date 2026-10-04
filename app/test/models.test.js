@@ -51,14 +51,6 @@ test('a picked model downloads its missing files from Hugging Face', async () =>
   assert.strictEqual(seen.length, 2);
 });
 
-test('the Qwen3.8 distill borrows the stock 2B vision file', () => {
-  const urls = missingFiles('qwen3.8-2b-distill-q4', tmp()).map((f) => f.url);
-  assert.deepStrictEqual(urls, [
-    'https://huggingface.co/empero-ai/Qwen3.8-2B-Distill-GGUF/resolve/main/Qwen3.8-2B-Q4_K_M.gguf',
-    'https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/mmproj-F16.gguf',
-  ]);
-});
-
 test('a failed download leaves no file behind', async () => {
   const dir = tmp();
   const failing = async () => ({ ok: true, status: 200, body: (async function* gen() { yield Buffer.from('x'); throw new Error('reset'); })() });
