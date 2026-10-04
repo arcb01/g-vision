@@ -4,11 +4,14 @@
 frames from the frame history (the newest plus the most eventful ones in
 the window), add what the tracker saw appear and leave, and ask Qwen's
 vision the player's question. Its answer is spoken as it is, which saves
-the agent's second round trip.
+the agent's second round trip. When the question names a part of the screen
+("bottom right"), a full-resolution crop of it from the newest frame goes
+along, so small HUD details like an ammo count stay readable.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -16,6 +19,7 @@ from typing import Any
 import httpx
 
 from gvision.agent.tools import ToolResult
+from gvision.memory.crop import crop_url, region_of
 from gvision.memory.events import EventLog
 from gvision.memory.history import FrameHistory
 from gvision.memory.narrator import image_part
@@ -51,16 +55,37 @@ HINT = "- For 'what just hit me', 'what was that' or 'what happened' questions, 
 PROMPT = """\
 These are screenshots of a video game the player is playing, oldest first: {times}.
 What the object tracker saw in that time: {events}
-The player asks: "{question}"
+{crop}The player asks: "{question}"
 Answer in one or two short spoken sentences, at most 25 words, no markdown. \
 Only say what you can see in the screenshots; if you can't tell, say so."""
 
 
+CROP_NOTE = (
+    "The last image is a sharp full-resolution close-up of the {region} of the screen right now; "
+    "use it for small details like numbers and icons.\n"
+)
+
+
 class LookTool:
-    def __init__(self, qwen: Any, history: FrameHistory, events: EventLog | None = None) -> None:
+    def __init__(self, qwen: Any, history: FrameHistory, events: EventLog | None = None, screen: Any = None) -> None:
         self.qwen = qwen
         self.history = history
         self.events = events
+        self.screen = screen
+        """``LatestFrame`` with the newest full-resolution frame, for crops."""
+
+    def _crop(self, question: str) -> tuple[str, dict[str, Any]] | None:
+        region = region_of(question)
+        image = self.screen.grab() if region and self.screen else None
+        if image is None:
+            return None
+        name, box = region
+        try:
+            url, (w, h) = crop_url(image, box)
+        except Exception as e:  # the overview frames still answer
+            log.warning("look: no crop: %s", e)
+            return None
+        return url, {"region": name, "size": f"{w}x{h}"}
 
     async def __call__(self, question: str = "", seconds: float | int | str = 10) -> ToolResult:
         try:
@@ -73,8 +98,11 @@ class LookTool:
             return ToolResult({"error": "no frames captured yet"})
         times = ", ".join(f"{max(0.0, now - f.ts):.0f} s ago" for f in frames)
         events = "; ".join(self.events.describe(now - seconds, now=now)) if self.events else ""
-        text = PROMPT.format(times=times, events=events or "nothing", question=question or "What happened?")
-        messages = [{"role": "user", "content": [{"type": "text", "text": text}, *(image_part(f.data_url()) for f in frames)]}]
+        crop = await asyncio.to_thread(self._crop, question) if question else None
+        text = PROMPT.format(times=times, events=events or "nothing", question=question or "What happened?",
+                             crop=CROP_NOTE.format(region=crop[1]["region"]) if crop else "")
+        images = [image_part(f.data_url()) for f in frames] + ([image_part(crop[0])] if crop else [])
+        messages = [{"role": "user", "content": [{"type": "text", "text": text}, *images]}]
         try:
             reply = await self.qwen.chat(messages, max_tokens=80)
         except httpx.HTTPError as e:
@@ -83,4 +111,7 @@ class LookTool:
         answer = reply.content.strip()
         if not answer:
             return ToolResult({"error": "nothing seen"})
-        return ToolResult({"seen": answer, "frames": len(frames), "seconds": seconds}, speak=answer)
+        content: dict[str, Any] = {"seen": answer, "frames": len(frames), "seconds": seconds}
+        if crop:
+            content["crop"] = crop[1]
+        return ToolResult(content, speak=answer)

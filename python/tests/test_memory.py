@@ -218,3 +218,55 @@ def test_look_and_text_tools_offered_together():
     abilities = Agent(FakeQwen(), WorldState(), tools).abilities()
     assert "call read_text" in abilities and "call look" in abilities
     assert "can't" not in abilities
+
+
+def test_regions_named_in_questions():
+    from gvision.memory.crop import region_of
+
+    assert region_of("How many bullets are there shown on the right bottom?") == ("bottom right", (0.6, 0.6, 1.0, 1.0))
+    assert region_of("what's in the bottom left corner")[0] == "bottom left"
+    assert region_of("what does the top center say")[0] == "top center"
+    assert region_of("what is on my left")[0] == "left"
+    assert region_of("what is in the middle of the screen")[0] == "center"
+    assert region_of("read the upper right")[0] == "top right"
+    # "left" and "right" that aren't places
+    assert region_of("How many bullets do I have left?") is None
+    assert region_of("what is that right now") is None
+    assert region_of("what just hit me?") is None
+
+
+def test_crop_is_full_resolution_and_capped():
+    pytest.importorskip("cv2")
+    from gvision.memory.crop import crop_url
+
+    image = np.zeros((1440, 2560, 3), np.uint8)
+    url, size = crop_url(image, (0.6, 0.6, 1.0, 1.0))
+    assert url.startswith("data:image/jpeg;base64,") and size == (1024, 576)
+    _, size = crop_url(image, (0.0, 0.6, 1.0, 1.0))  # the whole bottom band: scaled to 1280 wide
+    assert size == (1280, 288)
+
+
+def test_look_adds_a_sharp_crop_when_the_question_names_a_region():
+    pytest.importorskip("cv2")
+    from gvision.snapshot import LatestFrame
+
+    screen = LatestFrame()
+    screen.offer(Frame(ts=0.0, image=np.zeros((1440, 2560, 3), np.uint8)))
+    history = FrameHistory()
+    history.add(stored(__import__("time").time()))
+
+    async def ask(question):
+        qwen = FakeQwen(Reply("You have 10 bullets."))
+        tools = ToolExecutor(WorldState())
+        tools.register(SCHEMA, LookTool(qwen, history, screen=screen), HINT)
+        result = await tools.run("look", {"question": question, "seconds": 0})
+        return result, tools.step("look", {"question": question}, result, 1.0), qwen.calls[0]["messages"][0]["content"]
+
+    result, step, parts = asyncio.run(ask("How many bullets are on the bottom right?"))
+    assert len([p for p in parts if p["type"] == "image_url"]) == 2  # overview + crop
+    assert "close-up of the bottom right" in parts[0]["text"]
+    assert result.content["crop"] == {"region": "bottom right", "size": "1024x576"}
+    assert "Sharp crop of the bottom right: 1024x576 px" in step.detail
+
+    result, _, parts = asyncio.run(ask("How many bullets do I have left?"))
+    assert len([p for p in parts if p["type"] == "image_url"]) == 1 and "crop" not in result.content
