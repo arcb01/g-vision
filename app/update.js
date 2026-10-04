@@ -131,6 +131,14 @@ function runUpdate({
   return result;
 }
 
+// What the Update button runs with `cmd.exe /c` on Windows. `start` on a .bat
+// opens it with `cmd /k`, which leaves the window open after the launcher
+// exits, one more per update; `cmd /c` closes it. The doubled outer quotes
+// are what cmd /c strips, keeping the quotes around a path with spaces.
+function relaunchCommand(launcher, extra = '') {
+  return `start "G-VISION update" cmd /c ""${launcher}"${extra}"`;
+}
+
 if (require.main === module) {
   let python = null;
   try {
@@ -149,4 +157,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { fileHash, runUpdate };
+module.exports = { fileHash, relaunchCommand, runUpdate };

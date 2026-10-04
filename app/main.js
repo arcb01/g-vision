@@ -12,6 +12,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { relaunchCommand } = require('./update');
 const { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, screen, shell } = require('electron');
 const { parseMessage, validateMessage, makeMessage } = require('./protocol');
 const { CONFIG_FILE, REPO_ROOT, createServices, loadConfig, serviceCommands, visionService } = require('./services');
@@ -257,7 +258,7 @@ async function updateAndRestart() {
     const launcher = path.join(REPO_ROOT, 'G-VISION.bat');
     const extra = MODE === 'demo' ? ' --demo' : '';
     // Verbatim so cmd sees the quotes around a path with spaces as written.
-    spawn('cmd.exe', ['/c', `start "G-VISION update" "${launcher}"${extra}`], {
+    spawn('cmd.exe', ['/c', relaunchCommand(launcher, extra)], {
       detached: true,
       stdio: 'ignore',
       windowsVerbatimArguments: true,

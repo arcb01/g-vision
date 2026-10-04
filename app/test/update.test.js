@@ -141,3 +141,13 @@ test('after a Python install the GPU onnxruntime is put back if the CPU one repl
   runUpdate({ repoRoot: local, run, log: quiet, python: 'python', gpu: true });
   assert.strictEqual(seen.length, 2); // nothing changed: no install, no check
 });
+
+test('the Update button relaunches through cmd /c so its window closes', () => {
+  const { relaunchCommand } = require('../update');
+  const launcher = 'C:\\Users\\arnau\\Desktop\\coding projects\\G-vision\\G-VISION.bat';
+  assert.strictEqual(
+    relaunchCommand(launcher, ' --demo'),
+    'start "G-VISION update" cmd /c ""C:\\Users\\arnau\\Desktop\\coding projects\\G-vision\\G-VISION.bat" --demo"',
+  );
+  assert.ok(!relaunchCommand(launcher).includes('/k'));
+});
