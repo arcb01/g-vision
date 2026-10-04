@@ -181,6 +181,25 @@ def test_counting_something_untracked_falls_back_to_look():
         "Nothing tracked matches: look instead", "Qwen vision: look at recent frames", "Answer taken from the tool"]
 
 
+def test_a_screen_question_answered_without_a_tool_still_looks():
+    world = WorldState()
+    seen = []
+    qwen = FakeQwen(Reply("I can't see any grenades on your screen right now. I'm watching for them."))
+    agent = Agent(qwen, world, look_executor(world, seen))
+    answer = asyncio.run(agent.handle("How many blue grenades are there?"))
+    assert seen == [("How many blue grenades are there?", 0)]
+    assert answer.text == "You have 10 bullets." and answer.tool_calls == ["look"]
+    assert "Answered without looking: look instead" in [s.title for s in answer.steps]
+
+
+def test_small_talk_without_a_tool_does_not_look():
+    world = WorldState()
+    seen = []
+    agent = Agent(FakeQwen(Reply("You're welcome!")), world, look_executor(world, seen))
+    answer = asyncio.run(agent.handle("Thanks a lot"))
+    assert seen == [] and answer.text == "You're welcome!"
+
+
 def test_counting_tracked_objects_does_not_look():
     world = WorldState()
     world.set_objects(1.0, [obj("obj:1", "cow"), obj("obj:2", "cow", x=0.6)])
