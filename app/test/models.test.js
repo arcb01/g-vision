@@ -85,3 +85,9 @@ test('a downloaded vision model runs as a second llama-server the backend looks 
   const sameArgs = serviceCommands(same).backend.args;
   assert.strictEqual(sameArgs[sameArgs.indexOf('--vision-model') + 1], path.basename(same.llama.model, '.gguf'));
 });
+
+test('the vision-only toggle becomes --vision-only only when on', () => {
+  const { resolveSettings, settingsArgs } = require('../settings');
+  assert.ok(!settingsArgs(resolveSettings()).includes('--vision-only'));
+  assert.ok(settingsArgs(resolveSettings({ visionOnly: true })).includes('--vision-only'));
+});

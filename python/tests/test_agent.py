@@ -192,6 +192,17 @@ def test_a_screen_question_answered_without_a_tool_still_looks():
     assert "Answered without looking: look instead" in [s.title for s in answer.steps]
 
 
+def test_vision_only_skips_routing():
+    world = WorldState()
+    seen = []
+    qwen = FakeQwen()
+    agent = Agent(qwen, world, look_executor(world, seen), vision_only=True)
+    answer = asyncio.run(agent.handle("How many blue grenades are there?"))
+    assert qwen.calls == [] and seen == [("How many blue grenades are there?", 0)]
+    assert answer.text == "You have 10 bullets." and answer.tool_calls == ["look"]
+    assert answer.steps[0].title == "Routing skipped: vision only"
+
+
 def test_small_talk_without_a_tool_does_not_look():
     world = WorldState()
     seen = []

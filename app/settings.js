@@ -49,6 +49,11 @@ const SPEC = [
     help: 'The model that looks at the screen (look back, situation notes). Questions are still routed by the 2B. A new pick downloads once, then the vision server and backend restart on their own.',
   },
   {
+    key: 'visionOnly', group: 'Vision', label: 'Vision only (testing)', type: 'toggle', default: false,
+    onFlag: '--vision-only',
+    help: 'Skip routing: every question goes straight to the vision model, which answers. No highlights or text reading.',
+  },
+  {
     key: 'narrateEvery', group: 'Vision', label: 'Situation notes every', type: 'number', default: 25,
     min: 0, max: 300, step: 5, unit: 's', flag: '--narrate-every',
     help: 'How often Qwen sums up what is going on. 0 turns it off.',
@@ -115,6 +120,7 @@ function settingsArgs(settings, explicitArgs = []) {
     const value = settings[s.key];
     if (s.flag && !explicitArgs.includes(s.flag)) args.push(s.flag, String(value));
     if (s.offFlag && value === false && !explicitArgs.includes(s.offFlag)) args.push(s.offFlag);
+    if (s.onFlag && value === true && !explicitArgs.includes(s.onFlag)) args.push(s.onFlag);
   }
   return args;
 }

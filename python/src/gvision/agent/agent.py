@@ -95,10 +95,13 @@ def asks_about_screen(request: str, reply: str) -> bool:
 
 
 class Agent:
-    def __init__(self, qwen: Chat, world: WorldState, tools: ToolExecutor | None = None) -> None:
+    def __init__(self, qwen: Chat, world: WorldState, tools: ToolExecutor | None = None,
+                 vision_only: bool = False) -> None:
         self.qwen = qwen
         self.world = world
         self.tools = tools or ToolExecutor(world)
+        self.vision_only = vision_only
+        """Testing: skip routing and let the vision model answer every request."""
 
     def abilities(self) -> str:
         lines = CAN_READ if self.tools.text else CANNOT_READ
@@ -118,7 +121,20 @@ class Agent:
                 return "No matching text", result.content["note"]
         return None
 
+    async def look_only(self, request: str) -> Answer:
+        steps = [Step(kind="llm", title="Routing skipped: vision only",
+                      detail="Settings > Vision > Vision only is on; the question goes straight to look")]
+        t = time.perf_counter()
+        args = {"question": request, "seconds": 0}
+        look = await self.tools.run("look", args)
+        ms = (time.perf_counter() - t) * 1000
+        steps.append(self.tools.step("look", args, look, ms))
+        text = look.speak or look.content.get("error") or "I couldn't see anything."
+        return Answer(text, look.refs, ["look"], {"tools": ms}, steps=steps)
+
     async def handle(self, request: str) -> Answer:
+        if self.vision_only and self.tools.has("look"):
+            return await self.look_only(request)
         t0 = time.perf_counter()
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT.format(
