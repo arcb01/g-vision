@@ -396,6 +396,28 @@ def test_thinking_budget_goes_to_the_server_only_when_thinking():
     assert "thinking_budget_tokens" not in bodies[1]
 
 
+def test_prefill_stops_right_after_the_image():
+    import httpx
+
+    from gvision.agent.qwen import QwenClient
+
+    sent = {}
+
+    def handler(request):
+        body = __import__("json").loads(request.content)
+        sent[request.url.path] = body
+        if request.url.path == "/apply-template":
+            return httpx.Response(200, json={"prompt": "<|im_start|>user\n<__media_ab12__><|im_end|>\n<|im_start|>assistant\n"})
+        return httpx.Response(200, json={"content": ""})
+
+    client = QwenClient("http://x")
+    client._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    image = {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJD"}}
+    assert asyncio.run(client.prefill([{"role": "user", "content": [image]}])) is True
+    assert sent["/completion"]["prompt"] == {"prompt_string": "<|im_start|>user\n<__media_ab12__>", "multimodal_data": ["QUJD"]}
+    assert sent["/completion"]["n_predict"] == 0
+
+
 def test_push_to_talk_press_reads_the_screen_ahead_for_the_question():
     pytest.importorskip("cv2")
     from gvision.snapshot import LatestFrame

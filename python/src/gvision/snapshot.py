@@ -15,9 +15,11 @@ import numpy as np
 
 from gvision.perception.capture import Frame
 
-WIDTH = 960
-"""Wide enough to read in the panel, ~60-90 KB as JPEG."""
-JPEG_QUALITY = 75
+WIDTH = 1 << 16
+"""Kept at full resolution, so logged questions can be replayed to test vision
+settings and crops (~0.3-0.6 MB per 1920x1080 shot)."""
+JPEG_QUALITY = 90
+"""What the look tool sends, so small HUD digits look the same in the log."""
 
 Encode = Callable[[np.ndarray], str]
 

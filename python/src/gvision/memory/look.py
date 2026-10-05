@@ -111,8 +111,11 @@ class LookTool:
         if sharp is None:
             return
         self._warm = (time.time(), *sharp)
-        try:  # one token: only the image's prompt cache matters
-            await self.qwen.chat([{"role": "user", "content": [image_part(sharp[0])]}], max_tokens=1)
+        messages = [{"role": "user", "content": [image_part(sharp[0])]}]
+        try:  # only the image's prompt cache matters
+            prefill = getattr(self.qwen, "prefill", None)
+            if not (prefill and await prefill(messages)):
+                await self.qwen.chat(messages, max_tokens=1)
         except httpx.HTTPError as e:
             log.warning("look: reading ahead failed: %s", e)
 

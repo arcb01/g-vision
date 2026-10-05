@@ -44,11 +44,15 @@ class SharedQwen:
 
     async def _foreground(self, client: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None,
                           max_tokens: int, **kwargs: Any):
+        return await self._first(client.chat(messages, tools=tools, max_tokens=max_tokens, **kwargs))
+
+    async def _first(self, call: Any):
+        """Run ``call`` (a coroutine) ahead of any background call."""
         self._active += 1
         for task in self._background:
             task.cancel()
         try:
-            return await client.chat(messages, tools=tools, max_tokens=max_tokens, **kwargs)
+            return await call
         finally:
             self._active -= 1
             self._last_used = time.monotonic()
@@ -97,3 +101,10 @@ class _Looking:
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                    max_tokens: int = 200, **kwargs: Any):
         return await self.shared._foreground(self.shared.vision, messages, tools, max_tokens, **kwargs)
+
+    async def prefill(self, messages: list[dict[str, Any]]) -> bool:
+        """Read ``messages`` ahead on the vision server; False when it can't."""
+        vision = self.shared.vision
+        if not hasattr(vision, "prefill"):
+            return False
+        return await self.shared._first(vision.prefill(messages))
