@@ -37,6 +37,8 @@ class Reply:
 
 
 THINK_END = re.compile(r"</think>")
+MEDIA = re.compile(r"<__media_?\w*__>")
+"""Where llama-server's chat template put an image (the marker is random per server)."""
 
 
 class QwenClient:
@@ -46,7 +48,7 @@ class QwenClient:
 
     async def chat(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, max_tokens: int = 200,
-        response_format: dict[str, Any] | None = None, think: bool = False,
+        response_format: dict[str, Any] | None = None, think: bool = False, think_budget: int | None = None,
     ) -> Reply:
         body: dict[str, Any] = {
             "messages": messages,
@@ -56,6 +58,10 @@ class QwenClient:
             # think=True is only for the vision server (Settings > Vision > Reasoning).
             "chat_template_kwargs": {"enable_thinking": think},
         }
+        if think and think_budget:
+            # llama-server closes the thinking after this many tokens and the
+            # model answers from what it has so far, in the same request.
+            body["thinking_budget_tokens"] = think_budget
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
@@ -76,6 +82,28 @@ class QwenClient:
         # A template that leaves the thinking in the answer: keep only what follows it.
         content = THINK_END.split(msg.get("content") or "")[-1].strip()
         return Reply(content, calls, msg)
+
+    async def prefill(self, messages: list[dict[str, Any]]) -> bool:
+        """Have the server read ``messages`` up to their last image, generating nothing.
+
+        Qwen3.5 is partly recurrent, so llama-server can only reuse a cached
+        prompt that ends exactly where the next one diverges. A chat request
+        would add the end-of-turn tokens after the image; this stops right
+        after it, so a later chat with the same images first skips them.
+        """
+        r = await self._http.post(f"{self.url}/apply-template", json={"messages": messages})
+        r.raise_for_status()
+        prompt = r.json()["prompt"]
+        markers = list(MEDIA.finditer(prompt))
+        images = [p["image_url"]["url"].split(",", 1)[1] for m in messages if isinstance(m.get("content"), list)
+                  for p in m["content"] if p.get("type") == "image_url"]
+        if not markers or len(markers) != len(images):
+            return False
+        body = {"prompt": {"prompt_string": prompt[:markers[-1].end()], "multimodal_data": images},
+                "n_predict": 0, "cache_prompt": True}
+        r = await self._http.post(f"{self.url}/completion", json=body)
+        r.raise_for_status()
+        return True
 
     async def health(self) -> bool:
         try:

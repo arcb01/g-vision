@@ -356,7 +356,7 @@ def test_reasoning_and_image_resolution_settings_reach_look():
         return result, tools.step("look", {}, result, 1.0), qwen.kwargs
 
     result, step, kwargs = asyncio.run(ask(reasoning=True, screen_side=1024))
-    assert kwargs == {"max_tokens": 1024, "think": True}
+    assert kwargs == {"max_tokens": 360, "think": True, "think_budget": 200}
     assert result.content["thought"] == 3 and "Reasoning on: thought for 3 words" in step.detail
     assert result.content["screen"] == "1024x576"
 
@@ -377,27 +377,45 @@ def test_thinking_left_in_the_answer_is_dropped():
     assert asyncio.run(client.chat([], think=True)).content == "Two."
 
 
-def test_thinking_that_runs_out_of_tokens_answers_again_without_thinking():
-    class LongThinker:
-        def __init__(self):
-            self.calls = []
+def test_thinking_budget_goes_to_the_server_only_when_thinking():
+    import httpx
 
-        async def chat(self, messages, tools=None, max_tokens=200, **kwargs):
-            self.calls.append({"max_tokens": max_tokens, **kwargs})
-            if kwargs.get("think"):
-                return Reply("", raw={"reasoning_content": "hmm " * 700})
-            return Reply("Two blue grenades.")
+    from gvision.agent.qwen import QwenClient
 
-    history = FrameHistory()
-    history.add(stored(__import__("time").time()))
-    qwen = LongThinker()
-    tools = ToolExecutor(WorldState())
-    tools.register(SCHEMA, LookTool(qwen, history, reasoning=True), HINT)
-    result = asyncio.run(tools.run("look", {"question": "How many blue grenades?", "seconds": 0}))
-    assert result.speak == "Two blue grenades."
-    assert qwen.calls == [{"max_tokens": 1024, "think": True}, {"max_tokens": 80}]
-    step = tools.step("look", {}, result, 1.0)
-    assert "still thinking after 700 words, so it answered again without thinking" in step.detail
+    bodies = []
+
+    def handler(request):
+        bodies.append(__import__("json").loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "Two."}}]})
+
+    client = QwenClient("http://x")
+    client._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    asyncio.run(client.chat([], think=True, think_budget=200))
+    asyncio.run(client.chat([], think_budget=200))
+    assert bodies[0]["thinking_budget_tokens"] == 200
+    assert "thinking_budget_tokens" not in bodies[1]
+
+
+def test_prefill_stops_right_after_the_image():
+    import httpx
+
+    from gvision.agent.qwen import QwenClient
+
+    sent = {}
+
+    def handler(request):
+        body = __import__("json").loads(request.content)
+        sent[request.url.path] = body
+        if request.url.path == "/apply-template":
+            return httpx.Response(200, json={"prompt": "<|im_start|>user\n<__media_ab12__><|im_end|>\n<|im_start|>assistant\n"})
+        return httpx.Response(200, json={"content": ""})
+
+    client = QwenClient("http://x")
+    client._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    image = {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJD"}}
+    assert asyncio.run(client.prefill([{"role": "user", "content": [image]}])) is True
+    assert sent["/completion"]["prompt"] == {"prompt_string": "<|im_start|>user\n<__media_ab12__>", "multimodal_data": ["QUJD"]}
+    assert sent["/completion"]["n_predict"] == 0
 
 
 def test_push_to_talk_press_reads_the_screen_ahead_for_the_question():

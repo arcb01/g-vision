@@ -10,7 +10,8 @@ along, so small HUD details like an ammo count stay readable. For "right
 now" questions (seconds 0) the newest frame goes at 1600 px (Settings >
 Vision > Image resolution) instead of the 640 px history copy, where an
 inventory icon is only about a dozen pixels. With Settings > Vision >
-Reasoning on, the vision model thinks before it answers.
+Reasoning on, the vision model thinks briefly (a 200-token budget) before
+it answers; longer thinking was slower and talked itself into wrong counts.
 
 ``warm`` runs on push-to-talk press: it grabs that frame and has the vision
 server read it while the player is still talking (llama-server keeps the
@@ -40,7 +41,9 @@ MAX_SECONDS = 60.0
 FRAMES = 4
 WARM_MAX_AGE = 30.0
 """Seconds a frame read at push-to-talk press stays usable for the question."""
-THINK_TOKENS = 1024
+THINK_BUDGET = 200
+"""Thinking tokens before the server makes the model answer (about 130 words)."""
+THINK_TOKENS = THINK_BUDGET + 160
 """Room for the thinking plus the short answer when reasoning is on."""
 
 SCHEMA: dict[str, Any] = {
@@ -108,8 +111,11 @@ class LookTool:
         if sharp is None:
             return
         self._warm = (time.time(), *sharp)
-        try:  # one token: only the image's prompt cache matters
-            await self.qwen.chat([{"role": "user", "content": [image_part(sharp[0])]}], max_tokens=1)
+        messages = [{"role": "user", "content": [image_part(sharp[0])]}]
+        try:  # only the image's prompt cache matters
+            prefill = getattr(self.qwen, "prefill", None)
+            if not (prefill and await prefill(messages)):
+                await self.qwen.chat(messages, max_tokens=1)
         except httpx.HTTPError as e:
             log.warning("look: reading ahead failed: %s", e)
 
@@ -167,16 +173,10 @@ class LookTool:
         images = [image_part(u) for u in urls] + ([image_part(crop[0])] if crop else [])
         messages = [{"role": "user", "content": [*images, {"type": "text", "text": text}]}]
         thought = None
-        cut = False
         try:
             if self.reasoning:
-                reply = await self.qwen.chat(messages, max_tokens=THINK_TOKENS, think=True)
+                reply = await self.qwen.chat(messages, max_tokens=THINK_TOKENS, think=True, think_budget=THINK_BUDGET)
                 thought = len(((reply.raw or {}).get("reasoning_content") or "").split())
-                # Still thinking when the tokens ran out: ask again without thinking
-                # rather than answer "nothing seen".
-                cut = not reply.content.strip()
-                if cut:
-                    reply = await self.qwen.chat(messages, max_tokens=80)
             else:
                 reply = await self.qwen.chat(messages, max_tokens=80)
         except httpx.HTTPError as e:
@@ -192,8 +192,6 @@ class LookTool:
             content["read_ahead"] = True
         if thought is not None:
             content["thought"] = thought
-        if cut:
-            content["thinking_cut"] = True
         if crop:
             content["crop"] = crop[1]
         return ToolResult(content, speak=answer)
