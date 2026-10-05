@@ -44,6 +44,8 @@ log = logging.getLogger(__name__)
 MIN_CLIP_S = 0.3
 LEVEL_HZ = 20
 """How often voice loudness goes to the overlay's wave animation."""
+TEXT_LINGER_S = 0.6
+"""How long the last text outline stays after the voice finishes."""
 CHARS_PER_S = 15.0
 """Speaking rate assumed when there is no voice (--no-tts), for text cues."""
 
@@ -236,11 +238,17 @@ class Assistant:
             elif cues:  # no voice: still walk through the text at reading pace
                 duration = len(answer.text) / CHARS_PER_S
                 await self._light_text([(at * duration, ref) for at, ref in cues])
+                await asyncio.sleep(max(0.0, duration * (1 - cues[-1][0])))
         finally:
             if synth:
                 synth.cancel()
         self.bridge.send(AnswerFinishedMsg(answer_id=answer_id))
         self.bridge.send(VoiceMsg(state="idle"))
+        if cues:
+            # Read out: the outline and dimming go away; watched objects keep
+            # theirs, the live pipeline sends them again on its next step.
+            await asyncio.sleep(TEXT_LINGER_S)
+            text.clear()
 
     async def _synthesize(self, pieces: list[str], out: asyncio.Queue) -> None:
         try:

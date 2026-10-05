@@ -303,6 +303,9 @@ class FakeText:
     def show(self, refs, known=None):
         pass
 
+    def clear(self):
+        self.lit.append("cleared")
+
     def light(self, ref, segment_id=0):
         self.lit.append(ref)
 
@@ -330,7 +333,7 @@ def test_voice_starts_after_the_first_sentence():
     assert tts.events.index(("play", 2400)) < len(tts.events) - 1
     assert steps[0].title == "Voice: Kokoro af_heart on GPU"
     assert steps[0].detail == "first of 2 sentences: 0.1 s of speech"
-    assert text.lit == ["text:1", "text:2"]  # each lit with its own sentence
+    assert text.lit == ["text:1", "text:2", "cleared"]  # each lit with its own sentence, then cleared
 
 
 def test_stop_skips_the_rest_of_the_answer():
