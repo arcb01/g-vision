@@ -134,6 +134,9 @@ class ToolResult:
     """Elements the answer is about, for the spotlight."""
     text_refs: list[str] = field(default_factory=list)
     """Text blocks the answer may be about; highlighted once the answer says which."""
+    text_blocks: dict[str, Any] = field(default_factory=dict)
+    """Those blocks as they were read, so they can still be outlined if the
+    watcher has re-read or lost them by the time the answer is spoken."""
     speak: str | None = None
     """A finished spoken answer (e.g. from Qwen's vision); spares the agent's second call."""
 
@@ -270,7 +273,7 @@ class ToolExecutor:
         content["text"] = [b.info() for b in blocks]
         if not blocks:
             content["note"] = "no readable text there"
-        return ToolResult(content, text_refs=[b.ref for b in blocks])
+        return ToolResult(content, text_refs=[b.ref for b in blocks], text_blocks={b.ref: b for b in blocks})
 
     async def recent_text(self, seconds: int | float = 60, about: str | None = None) -> ToolResult:
         await self.text.refresh()
@@ -287,29 +290,49 @@ class ToolExecutor:
         content: dict[str, Any] = {"text": [b.info(now) for b in blocks]}
         if not blocks:
             content["note"] = "no text seen in that time"
-        return ToolResult(content, text_refs=[b.ref for b in blocks if b.gone is None])
+        shown = [b for b in blocks if b.gone is None]
+        return ToolResult(content, text_refs=[b.ref for b in shown], text_blocks={b.ref: b for b in shown})
 
     def text_cues(self, answer: str, results: list[ToolResult]) -> list[tuple[float, str]]:
         """The text blocks the answer quotes, each with where in the answer it
-        starts being read (0..1 of its length), so its glow can follow the voice."""
-        candidates = [ref for r in results for ref in r.text_refs]
-        if not self.text or not candidates:
+        starts being read (0..1 of its length), so its glow can follow the voice.
+
+        Candidates are the blocks a text tool returned. When no text tool ran
+        or vision answered instead (the reader found no block mentioning the
+        player's word, such as "sign"), it is every block on screen, with a
+        stricter match, so text vision quotes is still outlined."""
+        if not self.text:
             return []
+        known = self.text_known(results)
+        candidates = [ref for r in results for ref in r.text_refs]
+        strict = not candidates
+        if strict:
+            candidates = [b.ref for b in self.text.visible()]
         lowered = answer.lower()
         said = text_words(answer)
         cues: list[tuple[float, str]] = []
         for ref in dict.fromkeys(candidates):
-            block = self.text.blocks.get(ref)
+            block = self.text.blocks.get(ref) or known.get(ref)
             if not block:
                 continue
-            shared = said & text_words(block.text)
-            if shared and len(shared) >= min(2, len(text_words(block.text))):
+            have = text_words(block.text)
+            shared = said & have
+            need = min(2, len(have)) if strict else min(2, (len(have) + 1) // 2)
+            if shared and len(shared) >= need:
                 hits = (re.search(rf"\b{re.escape(w)}", lowered) for w in shared)
                 start = min((m.start() for m in hits if m), default=0)
                 cues.append((start / max(len(answer), 1), ref))
-        if not cues and len(candidates) == 1 and candidates[0] in self.text.blocks:
-            cues = [(0.0, candidates[0])]
+        # One block read and Qwen paraphrased it: that block is what it read.
+        # Not when vision answered or the reader said nothing matched.
+        settled = not any(r.speak or r.content.get("note") for r in results)
+        if not cues and not strict and settled and len(candidates) == 1:
+            if candidates[0] in self.text.blocks or candidates[0] in known:
+                cues = [(0.0, candidates[0])]
         return sorted(cues)[:MAX_TEXT_BLOCKS]
+
+    def text_known(self, results: list[ToolResult]) -> dict[str, Any]:
+        """Text blocks as the tools read them, by ref."""
+        return {ref: b for r in results for ref, b in r.text_blocks.items()}
 
 
 _STOP = {"the", "and", "what", "does", "say", "says", "said", "that", "this", "with", "for", "you", "your",

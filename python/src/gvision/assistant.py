@@ -228,7 +228,7 @@ class Assistant:
             text = self.agent.tools.text
             cues = answer.text_cues if text else []
             if cues:
-                text.show([ref for _, ref in cues])
+                text.show([ref for _, ref in cues], known=answer.text_blocks)
             self.bridge.send(SegmentStartedMsg(answer_id=answer_id, segment_id=0))
             self.bridge.send(VoiceMsg(state="speaking"))
             if first is not None:

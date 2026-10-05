@@ -515,10 +515,14 @@ class TextWatcher:
             if frame is not None:
                 await self.tick(frame, force=True)
 
-    def show(self, refs: list[str], color_role: ColorRole = "info") -> list[str]:
+    def show(self, refs: list[str], color_role: ColorRole = "info",
+             known: dict[str, TextBlock] | None = None) -> list[str]:
         """Outline the blocks an answer will read, all unlit under the dimmed
-        screen; ``light`` then makes the one being read glow. Returns the refs shown."""
-        blocks = [self.blocks[r] for r in refs if r in self.blocks]
+        screen; ``light`` then makes the one being read glow. ``known`` holds
+        blocks as a tool read them, for ones the watcher has since lost (a
+        toast sliding away). Returns the refs shown."""
+        known = known or {}
+        blocks = [b for b in (self.blocks.get(r) or known.get(r) for r in refs) if b]
         if not self.bridge or not blocks:
             return [b.ref for b in blocks]
         for b in blocks:
