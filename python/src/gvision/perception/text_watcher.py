@@ -44,7 +44,7 @@ import numpy as np
 from gvision.bridge import Bridge
 from gvision.perception.capture import Frame, FrameSource
 from gvision.perception.ocr import OcrEngine
-from gvision.protocol import Box, ColorRole, ConfigChangedMsg, DimMsg, FocusMsg, HighlightMsg, Message
+from gvision.protocol import Box, ClearMsg, ColorRole, ConfigChangedMsg, DimMsg, FocusMsg, HighlightMsg, Message
 from gvision.world import where
 
 log = logging.getLogger(__name__)
@@ -538,6 +538,11 @@ class TextWatcher:
         if self.bridge:
             self.bridge.send(FocusMsg(refs=[ref], segment_id=segment_id))
             self.bridge.send(DimMsg(on=True, strength=self.dim_strength))
+
+    def clear(self) -> None:
+        """The answer has been read: drop the outlines and the dimming."""
+        if self.bridge:
+            self.bridge.send(ClearMsg(reason="text read"))
 
     # --- background loop ---------------------------------------------------
 

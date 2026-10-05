@@ -16,7 +16,7 @@ from gvision.perception.text_watcher import (
     group_lines,
     matches_where,
 )
-from gvision.protocol import Box, DimMsg, FocusMsg, HighlightMsg, dump, parse
+from gvision.protocol import Box, ClearMsg, DimMsg, FocusMsg, HighlightMsg, dump, parse
 from gvision.world import WorldState
 from test_agent import FakeQwen, tool_reply
 from test_live import FakeBridge
@@ -156,6 +156,7 @@ def test_read_text_glow_follows_the_voice(monkeypatch):
     from gvision.assistant import Assistant
 
     monkeypatch.setattr(assistant_module, "CHARS_PER_S", 2000.0)  # no voice: walk the cues fast
+    monkeypatch.setattr(assistant_module, "TEXT_LINGER_S", 0.0)
     ocr = FakeOcr()
     bridge = FakeBridge()
     door = (40, 300, 280, 24, "Press E to open the door")
@@ -181,6 +182,8 @@ def test_read_text_glow_follows_the_voice(monkeypatch):
     assert all(h.box.w > 0 for h in highlights)
     # Both are outlined unlit first, then each glows only while it is being read.
     assert [m.refs for m in bridge.sent if isinstance(m, FocusMsg)] == [[], [quest], [press]]
+    # Once read, the outlines and dimming are cleared.
+    assert isinstance(bridge.sent[-1], ClearMsg) and bridge.sent[-1].reason == "text read"
     assert any(isinstance(m, DimMsg) and m.on for m in bridge.sent)
     for m in bridge.sent:
         assert parse(dump(m)) == m
