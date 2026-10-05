@@ -237,7 +237,7 @@ def test_text_without_the_answer_falls_back_to_look():
     world = WorldState()
     seen = []
     tools = look_executor(world, seen)
-    tools.text = type("Text", (), {"timing_ms": {}})()  # offer the text tools
+    tools.text = type("Text", (), {"timing_ms": {}, "blocks": {}, "visible": lambda self: []})()  # offer the text tools
 
     async def read_text(about=None, where=None):
         return ToolResult({"note": "no text mentions 'ammo'; this is all the text there",

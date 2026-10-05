@@ -55,6 +55,8 @@ class Answer:
     text_cues: list[tuple[float, str]] = field(default_factory=list)
     """(where in the text it starts being read, 0..1; text block ref): the
     block lights up when the voice reaches it."""
+    text_blocks: dict[str, Any] = field(default_factory=dict)
+    """Blocks as the text tools read them, for outlining ones since lost."""
     steps: list[Step] = field(default_factory=list)
     """What it took, for the panel's log."""
 
@@ -130,7 +132,7 @@ class Agent:
         ms = (time.perf_counter() - t) * 1000
         steps.append(self.tools.step("look", args, look, ms))
         text = look.speak or look.content.get("error") or "I couldn't see anything."
-        return Answer(text, look.refs, ["look"], {"tools": ms}, steps=steps)
+        return self.with_text(Answer(text, look.refs, ["look"], {"tools": ms}, steps=steps), [look])
 
     async def handle(self, request: str) -> Answer:
         if self.vision_only and self.tools.has("look"):
@@ -163,7 +165,7 @@ class Agent:
                     latency["tools"] = (time.perf_counter() - t) * 1000
                     steps.append(Step(kind="llm", title="Answer taken from the tool",
                                       detail="no second Qwen call needed"))
-                    return Answer(look.speak, look.refs, ["look"], latency, steps=steps)
+                    return self.with_text(Answer(look.speak, look.refs, ["look"], latency, steps=steps), [look])
             return Answer(reply.content or "Sorry, I didn't get that.", latency_ms=latency, steps=steps)
 
         results: list[ToolResult] = []
@@ -190,13 +192,14 @@ class Agent:
             if look.speak:
                 latency["tools"] = (time.perf_counter() - t1) * 1000
                 steps.append(Step(kind="llm", title="Answer taken from the tool", detail="no second Qwen call needed"))
-                return Answer(look.speak, look.refs, names + ["look"], latency, steps=steps)
+                return self.with_text(Answer(look.speak, look.refs, names + ["look"], latency, steps=steps),
+                                      results + [look])
         latency["tools"] = (time.perf_counter() - t1) * 1000
         refs = [ref for r in results for ref in r.refs]
         if all(r.speak for r in results):
             steps.append(Step(kind="llm", title="Answer taken from the tool", detail="no second Qwen call needed"))
-            return Answer(" ".join(r.speak for r in results), refs, [c.name for c in reply.tool_calls], latency,
-                          steps=steps)
+            return self.with_text(Answer(" ".join(r.speak for r in results), refs, [c.name for c in reply.tool_calls],
+                                         latency, steps=steps), results)
 
         t2 = time.perf_counter()
         final = await self.qwen.chat(messages, max_tokens=60)
@@ -207,6 +210,12 @@ class Agent:
             detail=final.content if final.content else f"no answer; used the built-in fallback: {text!r}",
             ok=bool(final.content),
         ))
-        cues = self.tools.text_cues(text, results)
-        refs += [ref for _, ref in cues]
-        return Answer(text, refs, [c.name for c in reply.tool_calls], latency, cues, steps)
+        return self.with_text(Answer(text, refs, [c.name for c in reply.tool_calls], latency, steps=steps), results)
+
+    def with_text(self, answer: Answer, results: list[ToolResult]) -> Answer:
+        """Attach the on-screen text the answer quotes, whichever tool answered,
+        so its outline follows the voice."""
+        answer.text_cues = self.tools.text_cues(answer.text, results)
+        answer.text_blocks = self.tools.text_known(results)
+        answer.refs += [ref for _, ref in answer.text_cues if ref not in answer.refs]
+        return answer

@@ -215,3 +215,84 @@ def test_without_watcher_text_tools_are_not_offered():
     tools = ToolExecutor(WorldState())
     assert tools.specs is TOOLS
     assert "error" in asyncio.run(tools.run("read_text", {})).content
+
+
+# --- regressions from Arnau's logs (2026-10-05): the outline never showed ---
+
+SIGN = (300, 340, 260, 24, "Hello my friend")
+COORDS = (20, 20, 160, 22, "34, 68, 54")
+
+
+def text_and_look(bridge, image, ocr, said):
+    """An executor with the real watcher and a fake vision tool that says ``said``."""
+    from gvision.agent.tools import ToolResult
+    from gvision.memory.look import SCHEMA
+
+    world = WorldState()
+    watcher = TextWatcher(bridge, FakeSource(image), ocr, profiles_dir=None)
+    tools = ToolExecutor(world, text=watcher)
+    looked = []
+
+    async def look(question="", seconds=10):
+        looked.append(question)
+        return ToolResult({"seen": said}, speak=said)
+
+    tools.register(SCHEMA, look)
+    return world, watcher, tools, looked
+
+
+def test_vision_answer_still_outlines_the_text_it_quotes(monkeypatch):
+    """Qwen asks read_text about 'sign', a word not on the sign; vision answers.
+    The sign's text was read, so it must still be outlined."""
+    import gvision.assistant as assistant_module
+    from gvision.assistant import Assistant
+
+    monkeypatch.setattr(assistant_module, "CHARS_PER_S", 2000.0)
+    ocr = FakeOcr()
+    bridge = FakeBridge()
+    image = scene(ocr, [SIGN, COORDS])
+    world, watcher, tools, looked = text_and_look(bridge, image, ocr, 'The sign on the left says "Hello my friend".')
+    qwen = FakeQwen(tool_reply("read_text", about="sign", where="left"))
+    answer = asyncio.run(Assistant(bridge, world, Agent(qwen, world, tools)).ask("What does the sign on the left say?"))
+
+    assert looked and answer.tool_calls == ["read_text", "look"]
+    sign = next(b.ref for b in watcher.visible() if b.text == "Hello my friend")
+    assert [ref for _, ref in answer.text_cues] == [sign]  # not the coordinates
+    assert [m.ref for m in bridge.sent if isinstance(m, HighlightMsg)] == [sign]
+    assert [m.refs for m in bridge.sent if isinstance(m, FocusMsg)] == [[], [sign]]
+
+
+def test_vision_answer_without_a_text_tool_outlines_quoted_text():
+    """Vision-only mode or a direct look: match the answer against what is on screen."""
+    ocr = FakeOcr()
+    image = scene(ocr, [SIGN, COORDS, (900, 340, 120, 24, "Yes sir")])
+    world, watcher, tools, _ = text_and_look(FakeBridge(), image, ocr, 'The sign says "Yes sir".')
+    asyncio.run(watcher.refresh())
+    answer = asyncio.run(Agent(FakeQwen(), world, tools, vision_only=True).handle("what does this say?"))
+    yes = next(b.ref for b in watcher.visible() if b.text == "Yes sir")
+    assert [ref for _, ref in answer.text_cues] == [yes]
+
+
+def test_vision_answer_about_something_else_outlines_nothing():
+    ocr = FakeOcr()
+    image = scene(ocr, [COORDS])
+    world, _, tools, _ = text_and_look(FakeBridge(), image, ocr, "That is a spider.")
+    qwen = FakeQwen(tool_reply("read_text", about="spider"))
+    answer = asyncio.run(Agent(qwen, world, tools).handle("What is this?"))
+    assert answer.text_cues == []  # the lone coordinates block is not what it read
+
+
+def test_text_that_left_the_screen_is_still_outlined():
+    """A toast read by read_text can be gone (or re-grouped) by the time the answer is spoken."""
+    ocr = FakeOcr()
+    bridge = FakeBridge()
+    image = scene(ocr, [(900, 40, 300, 24, "New Recipes Unlocked!")])
+    world = WorldState()
+    watcher = TextWatcher(bridge, FakeSource(image), ocr, profiles_dir=None)
+    tools = ToolExecutor(world, text=watcher)
+    result = asyncio.run(tools.run("read_text", {"where": "top right"}))
+    watcher.blocks = {}  # the toast slid away
+    cues = tools.text_cues('The top right shows a "New Recipes Unlocked!" message.', [result])
+    assert [ref for _, ref in cues] == result.text_refs
+    assert watcher.show(result.text_refs, known=tools.text_known([result])) == result.text_refs
+    assert any(isinstance(m, HighlightMsg) for m in bridge.sent)

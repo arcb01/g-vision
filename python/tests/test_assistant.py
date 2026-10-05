@@ -300,7 +300,7 @@ class FakeText:
     def __init__(self):
         self.lit = []
 
-    def show(self, refs):
+    def show(self, refs, known=None):
         pass
 
     def light(self, ref, segment_id=0):
