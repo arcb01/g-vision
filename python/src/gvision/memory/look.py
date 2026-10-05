@@ -94,8 +94,8 @@ class LookTool:
         self.screen_side = screen_side
         """Longest side of the "right now" frame; 0 keeps the 640 px history frame."""
         self.reasoning = reasoning
-        self._warm: tuple[float, str, str] | None = None
-        """(time, data URL, size) of the frame read at push-to-talk press."""
+        self._warm: tuple[float, str, str, Any] | None = None
+        """(time, data URL, size, image) of the frame read at push-to-talk press."""
         self._warming: asyncio.Task | None = None
 
     def warm(self) -> None:
@@ -119,17 +119,17 @@ class LookTool:
         except httpx.HTTPError as e:
             log.warning("look: reading ahead failed: %s", e)
 
-    async def _warmed(self) -> tuple[str, str] | None:
+    async def _warmed(self) -> tuple[str, str, Any] | None:
         """The frame read at press, once its prompt is cached, if still fresh."""
         if self._warming:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._warming
         if self._warm and time.time() - self._warm[0] <= WARM_MAX_AGE:
-            return self._warm[1], self._warm[2]
+            return self._warm[1:]
         return None
 
-    def _sharp(self) -> tuple[str, str] | None:
-        """The whole newest frame at up to ``screen_side`` px, with its size."""
+    def _sharp(self) -> tuple[str, str, Any] | None:
+        """The whole newest frame at up to ``screen_side`` px, with its size and the frame."""
         image = self.screen.grab() if self.screen and self.screen_side else None
         if image is None:
             return None
@@ -138,12 +138,14 @@ class LookTool:
         except Exception as e:  # the 640 px history frame still answers
             log.warning("look: no sharp frame: %s", e)
             return None
-        return url, f"{w}x{h}"
+        return url, f"{w}x{h}", image
 
-    def _crop(self, question: str) -> tuple[str, dict[str, Any]] | None:
+    def _crop(self, question: str, image: Any = None) -> tuple[str, dict[str, Any]] | None:
+        """A sharp crop of the region the question names, from ``image`` or the newest frame."""
         region = region_of(question)
-        image = self.screen.grab() if region and self.screen else None
-        if image is None:
+        if region and image is None and self.screen:
+            image = self.screen.grab()
+        if region is None or image is None:
             return None
         name, box = region
         try:
@@ -164,9 +166,10 @@ class LookTool:
             return ToolResult({"error": "no frames captured yet"})
         times = ", ".join(f"{max(0.0, now - f.ts):.0f} s ago" for f in frames)
         events = "; ".join(self.events.describe(now - seconds, now=now)) if self.events else ""
-        crop = await asyncio.to_thread(self._crop, question) if question else None
         warmed = await self._warmed() if not seconds else None
         sharp = warmed or (await asyncio.to_thread(self._sharp) if not seconds else None)
+        # Cut from the same frame as the overview, so both show one moment.
+        crop = await asyncio.to_thread(self._crop, question, sharp[2] if sharp else None) if question else None
         text = PROMPT.format(times=times, events=events or "nothing", question=question or "What happened?",
                              crop=CROP_NOTE.format(region=crop[1]["region"]) if crop else "")
         urls = [sharp[0]] if sharp else [f.data_url() for f in frames]

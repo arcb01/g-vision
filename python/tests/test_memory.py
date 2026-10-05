@@ -452,3 +452,40 @@ def test_push_to_talk_press_reads_the_screen_ahead_for_the_question():
     assert asked[0] == ahead[0] and asked[-1]["type"] == "text"
     assert result.content["read_ahead"] is True
     assert "Screen sent at 1600x900 px, read while you were talking" in step.detail
+
+
+def test_crop_comes_from_the_frame_read_at_the_press():
+    pytest.importorskip("cv2")
+    import base64
+
+    import cv2
+
+    from gvision.snapshot import LatestFrame
+
+    screen = LatestFrame()
+    screen.offer(Frame(ts=0.0, image=np.zeros((1440, 2560, 3), np.uint8)))
+    history = FrameHistory()
+    history.add(stored(__import__("time").time()))
+
+    class Recording:
+        def __init__(self):
+            self.asked = None
+
+        async def chat(self, messages, tools=None, max_tokens=200, **kwargs):
+            self.asked = messages[0]["content"]
+            return Reply("It says 119, 73, -19." if max_tokens > 1 else "")
+
+    async def run():
+        qwen = Recording()
+        look = LookTool(qwen, history, screen=screen)
+        look.warm()  # push-to-talk press on a black frame
+        await asyncio.sleep(0.1)
+        screen.offer(Frame(ts=1.0, image=np.full((1440, 2560, 3), 255, np.uint8)))  # the screen moves on
+        result = await look("What are the coordinates on the top left?", 0)
+        return qwen.asked, result
+
+    asked, result = asyncio.run(run())
+    assert result.content["crop"]["region"] == "top left"
+    crop = asked[1]["image_url"]["url"].split(",", 1)[1]
+    pixels = cv2.imdecode(np.frombuffer(base64.b64decode(crop), np.uint8), cv2.IMREAD_COLOR)
+    assert pixels.mean() < 5  # the black frame from the press, not the white one
