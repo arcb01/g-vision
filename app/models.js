@@ -56,6 +56,13 @@ const VISION_MODELS = [
     files: [['Qwen3.5-4B-Q6_K.gguf', 3.53 * GB], ['mmproj-F16.gguf', 0.672 * GB]],
   },
   {
+    id: 'qwen3.5-4b-q40',
+    label: 'Qwen3.5 4B Q4_0',
+    summary: '3.3 GB download, about +3.9 GB VRAM. About 1.5x slower per look.',
+    repo: 'unsloth/Qwen3.5-4B-GGUF',
+    files: [['Qwen3.5-4B-Q4_0.gguf', 2.58 * GB], ['mmproj-F16.gguf', 0.672 * GB]],
+  },
+  {
     id: 'qwen3.5-9b-q3km',
     label: 'Qwen3.5 9B Q3_K_M',
     summary: '5.6 GB download, about +6.3 GB VRAM. About 3x slower per look.',
