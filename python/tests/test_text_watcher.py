@@ -256,7 +256,7 @@ def test_vision_answer_still_outlines_the_text_it_quotes(monkeypatch):
     image = scene(ocr, [SIGN, COORDS])
     world, watcher, tools, looked = text_and_look(bridge, image, ocr, 'The sign on the left says "Hello my friend".')
     qwen = FakeQwen(tool_reply("read_text", about="sign", where="left"))
-    answer = asyncio.run(Assistant(bridge, world, Agent(qwen, world, tools)).ask("What does the sign on the left say?"))
+    answer = asyncio.run(Assistant(bridge, world, Agent(qwen, world, tools, route_first=True)).ask("What does the sign on the left say?"))
 
     assert looked and answer.tool_calls == ["read_text", "look"]
     sign = next(b.ref for b in watcher.visible() if b.text == "Hello my friend")
@@ -299,3 +299,22 @@ def test_text_that_left_the_screen_is_still_outlined():
     assert [ref for _, ref in cues] == result.text_refs
     assert watcher.show(result.text_refs, known=tools.text_known([result])) == result.text_refs
     assert any(isinstance(m, HighlightMsg) for m in bridge.sent)
+
+
+def test_look_first_answer_outlines_the_text_it_quotes(monkeypatch):
+    """Look answers (no read_text first) and quotes the sign: the sign is outlined."""
+    import gvision.assistant as assistant_module
+    from gvision.assistant import Assistant
+
+    monkeypatch.setattr(assistant_module, "CHARS_PER_S", 2000.0)
+    ocr = FakeOcr()
+    bridge = FakeBridge()
+    image = scene(ocr, [SIGN, COORDS])
+    world, watcher, tools, looked = text_and_look(bridge, image, ocr, 'The sign on the left says "Hello my friend".')
+    asyncio.run(watcher.refresh())
+    answer = asyncio.run(Assistant(bridge, world, Agent(FakeQwen(Reply("look")), world, tools)).ask(
+        "What does the sign on the left say?"))
+
+    assert looked and answer.tool_calls == ["look"]
+    sign = next(b.ref for b in watcher.visible() if b.text == "Hello my friend")
+    assert [ref for _, ref in answer.text_cues] == [sign]

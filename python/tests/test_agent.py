@@ -173,7 +173,7 @@ def test_counting_something_untracked_falls_back_to_look():
     world.set_objects(1.0, [obj("obj:1", "person")])
     seen = []
     qwen = FakeQwen(tool_reply("query_state"))
-    agent = Agent(qwen, world, look_executor(world, seen))
+    agent = Agent(qwen, world, look_executor(world, seen), route_first=True)
     answer = asyncio.run(agent.handle("How many bullets do I have left?"))
     assert seen == [("How many bullets do I have left?", 0)]
     assert answer.text == "You have 10 bullets." and answer.tool_calls == ["query_state", "look"]
@@ -185,7 +185,7 @@ def test_a_screen_question_answered_without_a_tool_still_looks():
     world = WorldState()
     seen = []
     qwen = FakeQwen(Reply("I can't see any grenades on your screen right now. I'm watching for them."))
-    agent = Agent(qwen, world, look_executor(world, seen))
+    agent = Agent(qwen, world, look_executor(world, seen), route_first=True)
     answer = asyncio.run(agent.handle("How many blue grenades are there?"))
     assert seen == [("How many blue grenades are there?", 0)]
     assert answer.text == "You have 10 bullets." and answer.tool_calls == ["look"]
@@ -206,7 +206,7 @@ def test_vision_only_skips_routing():
 def test_small_talk_without_a_tool_does_not_look():
     world = WorldState()
     seen = []
-    agent = Agent(FakeQwen(Reply("You're welcome!")), world, look_executor(world, seen))
+    agent = Agent(FakeQwen(Reply("You're welcome!")), world, look_executor(world, seen), route_first=True)
     answer = asyncio.run(agent.handle("Thanks a lot"))
     assert seen == [] and answer.text == "You're welcome!"
 
@@ -216,7 +216,7 @@ def test_counting_tracked_objects_does_not_look():
     world.set_objects(1.0, [obj("obj:1", "cow"), obj("obj:2", "cow", x=0.6)])
     seen = []
     qwen = FakeQwen(tool_reply("query_state"), Reply("There are 2 cows."))
-    agent = Agent(qwen, world, look_executor(world, seen))
+    agent = Agent(qwen, world, look_executor(world, seen), route_first=True)
     answer = asyncio.run(agent.handle("How many cows are there?"))
     assert seen == [] and answer.text == "There are 2 cows."
 
@@ -244,7 +244,7 @@ def test_text_without_the_answer_falls_back_to_look():
                            "text": [{"ref": "text:4", "text": "Ashley", "where": "bottom right"}]})
 
     tools.read_text = read_text
-    agent = Agent(FakeQwen(tool_reply("read_text", about="ammo")), world, tools)
+    agent = Agent(FakeQwen(tool_reply("read_text", about="ammo")), world, tools, route_first=True)
     answer = asyncio.run(agent.handle("How many bullets do I have left?"))
     assert seen == [("How many bullets do I have left?", 0)]
     assert answer.text == "You have 10 bullets." and answer.tool_calls == ["read_text", "look"]
@@ -264,6 +264,6 @@ def test_text_that_answers_does_not_look():
 
     tools.read_text = read_text
     tools.text_cues = lambda answer, results: []
-    agent = Agent(FakeQwen(tool_reply("read_text", about="ammo"), Reply("You have 10 bullets.")), world, tools)
+    agent = Agent(FakeQwen(tool_reply("read_text", about="ammo"), Reply("You have 10 bullets.")), world, tools, route_first=True)
     answer = asyncio.run(agent.handle("How many bullets do I have left?"))
     assert seen == [] and answer.tool_calls == ["read_text"]

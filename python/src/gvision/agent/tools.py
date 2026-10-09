@@ -179,6 +179,11 @@ class ToolExecutor:
         base = TOOLS + TEXT_TOOLS if self.text else TOOLS
         return base + self._extra_specs if self._extra_specs else base
 
+    @property
+    def action_specs(self) -> list[dict[str, Any]]:
+        """Only the tools that do something (look-first: questions go to look)."""
+        return [t for t in TOOLS if t["function"]["name"] in ("set_watch", "clear_watch")]
+
     def register(self, schema: dict[str, Any], handler: Callable[..., Awaitable[ToolResult]], hint: str = "") -> None:
         self._extra_specs.append(schema)
         self._extra[schema["function"]["name"]] = handler
@@ -222,6 +227,9 @@ class ToolExecutor:
                 detail += ", read while you were talking"
         if "thought" in result.content:
             detail += f"\nReasoning on: thought for {result.content['thought']} words"
+        known = result.content.get("evidence")
+        if known:
+            detail += "\nSent along: " + ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in known.items())
         crop = result.content.get("crop")
         if crop:
             detail += f"\nSharp crop of the {crop['region']}: {crop['size']} px at full resolution"
