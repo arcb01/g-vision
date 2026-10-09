@@ -10,8 +10,10 @@ along, so small HUD details like an ammo count stay readable. For "right
 now" questions (seconds 0) the newest frame goes at 1600 px (Settings >
 Vision > Image resolution) instead of the 640 px history copy, where an
 inventory icon is only about a dozen pixels. With Settings > Vision >
-Reasoning on, the vision model thinks briefly (a 200-token budget) before
-it answers; longer thinking was slower and talked itself into wrong counts.
+Reasoning on (the default in the app), the vision model thinks briefly (a
+200-token budget) before it answers. That is what reads small details: counts,
+and with the sharp crop a button prompt like "□ OPEN" that it otherwise calls
+"the OPEN button". Longer thinking was slower and talked itself into wrong counts.
 
 ``warm`` runs on push-to-talk press: it grabs that frame and has the vision
 server read it while the player is still talking (llama-server keeps the
