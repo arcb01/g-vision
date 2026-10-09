@@ -1,10 +1,10 @@
 """Evidence-first: look answers questions with OCR text and tracked objects
-attached, and Qwen 2B only picks actions, at the same time."""
+attached, and Qwen 2B only checks for an action when the request asks for one."""
 
 import asyncio
 import time
 
-from gvision.agent.agent import Agent, look_back
+from gvision.agent.agent import Agent, asks_action, look_back
 from gvision.agent.qwen import Reply
 from gvision.agent.tools import TOOLS, ToolExecutor, ToolResult
 from gvision.memory import FrameHistory, LookTool
@@ -51,21 +51,46 @@ def recording_look(seen, said="It says Old Death, 297.2m."):
     return look
 
 
-def test_a_question_goes_to_look_and_qwen_only_checks_for_actions():
+def test_a_question_goes_straight_to_look():
+    world = WorldState()
+    seen = []
+    tools = ToolExecutor(world)
+    tools.register(SCHEMA, recording_look(seen), HINT)
+    qwen = FakeQwen()  # the 2B would call set_watch("label") here
+    answer = asyncio.run(Agent(qwen, world, tools).handle("What does the label on the center say?"))
+
+    assert answer.text == "It says Old Death, 297.2m." and answer.tool_calls == ["look"]
+    assert seen == [("What does the label on the center say?", 0)]
+    assert qwen.calls == []
+    titles = [s.title for s in answer.steps]
+    assert titles == ["A question: look answers", "Qwen vision: look at recent frames"]
+
+
+def test_a_find_request_checks_for_an_action_alongside_look():
     world = WorldState()
     seen = []
     tools = ToolExecutor(world)
     tools.register(SCHEMA, recording_look(seen), HINT)
     qwen = FakeQwen(Reply("look"))
-    answer = asyncio.run(Agent(qwen, world, tools).handle("What does the label on the center say?"))
+    answer = asyncio.run(Agent(qwen, world, tools).handle("Show me the exit"))
 
-    assert answer.text == "It says Old Death, 297.2m." and answer.tool_calls == ["look"]
-    assert seen == [("What does the label on the center say?", 0)]
-    assert len(qwen.calls) == 1  # no second call: look's answer is spoken
+    assert answer.tool_calls == ["look"] and len(qwen.calls) == 1
     offered = {t["function"]["name"] for t in qwen.calls[0]["tools"]}
     assert offered == {"set_watch", "clear_watch"}
-    titles = [s.title for s in answer.steps]
-    assert titles == ["Qwen checks for an action", "Qwen vision: look at recent frames"]
+    assert [s.title for s in answer.steps] == ["Qwen checks for an action", "Qwen vision: look at recent frames"]
+
+
+def test_only_find_where_show_and_stop_ask_for_an_action():
+    # The questions replayed from the log, where the 2B wrongly called set_watch.
+    for question in ["What does it say on the door sign?", "How many bullets do we have left?",
+                     "What controls are shown?", "How many horse statues are there?",
+                     "How many blue grenades are there?", "What did I just pick up?",
+                     "What does the screen show?", "Is the area clear?"]:
+        assert not asks_action(question), question
+    for request in ["Where's the person?", "find the cow", "Show me the exit", "Highlight the chest",
+                    "Is there a creeper?", "Are there any zombies?", "Stop", "never mind", "I found it",
+                    "watch for skeletons", "clear that"]:
+        assert asks_action(request), request
 
 
 def test_an_action_still_runs_and_the_look_is_cancelled():
