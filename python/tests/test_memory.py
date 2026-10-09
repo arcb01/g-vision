@@ -201,7 +201,7 @@ def test_what_just_hit_me_end_to_end():
                         Reply("An arrow from the skeleton on your right."))
         tools = ToolExecutor(world)
         tools.register(SCHEMA, LookTool(qwen, history, events), HINT)
-        answer = await Agent(qwen, world, tools).handle("what just hit me?")
+        answer = await Agent(qwen, world, tools, route_first=True).handle("what just hit me?")
         return answer, qwen
 
     answer, qwen = asyncio.run(run())

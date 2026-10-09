@@ -209,6 +209,20 @@ terminal), `--no-tts`, `--qwen-url`. The first run downloads the Whisper
 weights to the Hugging Face cache and Kokoro (~120 MB) into
 `python/models/kokoro/`.
 
+### How questions are answered
+
+With scene memory on (the default), a question goes to the look tool, and the
+vision model answers it in one call. Along with the screen, look gets what
+perception already knows: the on-screen text the text watcher reads (exact,
+so the answer can quote it; text in the part of the screen the question names
+comes first), the objects the tracker confirms, and the narrator's notes. At
+the same time, Qwen3.5-2B checks whether you asked for an action: "where is",
+"find" or "show me" still go to `set_watch`, and "stop" goes to `clear_watch`.
+When it calls one, the look is cancelled. This replaced a router that tried
+`read_text` or `query_state` first: in 287 logged questions, 84% ended in
+look anyway, and half of those had first taken a detour that found nothing.
+`--route-first` brings back the old path, for comparing the two.
+
 ### Ask about text on screen
 
 With `--agent`, a text watcher reads the screen in the background with

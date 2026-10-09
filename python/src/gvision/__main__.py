@@ -130,7 +130,11 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
         vision = QwenClient(args.vision_url, timeout=90.0 if args.vision_reasoning else 30.0) if args.vision_url else None
         qwen = SharedQwen(qwen, vision=vision)
         side = 0 if args.look_size == "640" else 1 << 16 if args.look_size == "full" else int(args.look_size)
-        look = LookTool(qwen.looking, history, events, screen, screen_side=side, reasoning=args.vision_reasoning and bool(args.vision_url))
+        from gvision.memory.evidence import Evidence
+
+        evidence = None if args.route_first else Evidence(world, text)
+        look = LookTool(qwen.looking, history, events, screen, screen_side=side,
+                        reasoning=args.vision_reasoning and bool(args.vision_url), evidence=evidence)
         tools.register(SCHEMA, look, HINT)
         tools.vision_model = args.vision_model
         if args.narrate_every > 0:
@@ -151,7 +155,8 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
 
         asr = await asyncio.to_thread(load_asr, args.asr, args.asr_device, args.whisper_model)
         recorder = Recorder()
-    assistant = Assistant(bridge, world, Agent(qwen, world, tools, vision_only=args.vision_only), asr=asr, tts=tts, recorder=recorder,
+    assistant = Assistant(bridge, world, Agent(qwen, world, tools, vision_only=args.vision_only,
+                                                    route_first=args.route_first), asr=asr, tts=tts, recorder=recorder,
                           screen=screen, on_listen=look.warm if look else None)
     try:
         if args.no_mic:
@@ -199,6 +204,9 @@ def main() -> None:
                        help="name of the model behind look, shown in the panel's step log")
     agent.add_argument("--vision-only", action="store_true",
                        help="testing: skip routing and send every question to look (needs scene memory)")
+    agent.add_argument("--route-first", action="store_true",
+                       help="old path: Qwen 2B picks any tool first and look is the fallback (default: look answers "
+                            "questions with OCR text and tracked objects attached; Qwen only picks actions)")
     agent.add_argument("--look-size", choices=["640", "1024", "1280", "1600", "1920", "full"], default="1600",
                        help="longest side of the screen look sends for right-now questions; 640 = the history frame")
     agent.add_argument("--vision-reasoning", action="store_true",

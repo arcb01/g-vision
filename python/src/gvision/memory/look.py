@@ -32,6 +32,7 @@ import httpx
 from gvision.agent.tools import ToolResult
 from gvision.memory.crop import SCREEN_SIDE, crop_url, region_of
 from gvision.memory.events import EventLog
+from gvision.memory.evidence import Evidence
 from gvision.memory.history import FrameHistory
 from gvision.memory.narrator import image_part
 
@@ -72,9 +73,15 @@ HINT = "- For 'what just hit me', 'what was that' or 'what happened' questions, 
 PROMPT = """\
 These are screenshots of a video game the player is playing, oldest first: {times}.
 What the object tracker saw in that time: {events}
-{crop}The player asks: "{question}"
+{crop}{evidence}The player asks: "{question}"
 Answer in one or two short spoken sentences, at most 25 words, no markdown. \
-Only say what you can see in the screenshots; if you can't tell, say so."""
+Only say what you can see in the screenshots{or_know}; if you can't tell, say so."""
+
+EVIDENCE_NOTE = """\
+What G-VISION already knows about the screen (use it; the images win if they disagree):
+{lines}
+When the answer is text on screen, quote it exactly as written above.
+"""
 
 
 CROP_NOTE = (
@@ -85,8 +92,10 @@ CROP_NOTE = (
 
 class LookTool:
     def __init__(self, qwen: Any, history: FrameHistory, events: EventLog | None = None, screen: Any = None,
-                 screen_side: int = SCREEN_SIDE, reasoning: bool = False) -> None:
+                 screen_side: int = SCREEN_SIDE, reasoning: bool = False, evidence: Evidence | None = None) -> None:
         self.qwen = qwen
+        self.evidence = evidence
+        """OCR text, tracked objects and situation notes sent along with the screen."""
         self.history = history
         self.events = events
         self.screen = screen
@@ -170,8 +179,11 @@ class LookTool:
         sharp = warmed or (await asyncio.to_thread(self._sharp) if not seconds else None)
         # Cut from the same frame as the overview, so both show one moment.
         crop = await asyncio.to_thread(self._crop, question, sharp[2] if sharp else None) if question else None
+        known = await self.evidence.gather(question, seconds) if self.evidence else None
         text = PROMPT.format(times=times, events=events or "nothing", question=question or "What happened?",
-                             crop=CROP_NOTE.format(region=crop[1]["region"]) if crop else "")
+                             crop=CROP_NOTE.format(region=crop[1]["region"]) if crop else "",
+                             evidence=EVIDENCE_NOTE.format(lines=known.prompt) if known and known.prompt else "",
+                             or_know=" or what G-VISION already knows" if known and known.prompt else "")
         urls = [sharp[0]] if sharp else [f.data_url() for f in frames]
         images = [image_part(u) for u in urls] + ([image_part(crop[0])] if crop else [])
         messages = [{"role": "user", "content": [*images, {"type": "text", "text": text}]}]
@@ -197,4 +209,6 @@ class LookTool:
             content["thought"] = thought
         if crop:
             content["crop"] = crop[1]
-        return ToolResult(content, speak=answer)
+        if known:
+            content["evidence"] = known.counts
+        return ToolResult(content, speak=answer, text_blocks=known.blocks if known else {})
