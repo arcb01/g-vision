@@ -216,9 +216,11 @@ vision model answers it in one call. Along with the screen, look gets what
 perception already knows: the on-screen text the text watcher reads (exact,
 so the answer can quote it; text in the part of the screen the question names
 comes first), the objects the tracker confirms, and the narrator's notes. At
-the same time, Qwen3.5-2B checks whether you asked for an action: "where is",
-"find" or "show me" still go to `set_watch`, and "stop" goes to `clear_watch`.
-When it calls one, the look is cancelled. This replaced a router that tried
+the same time, when the request reads like an action ("where is", "find",
+"show me", "is there a", "stop"), Qwen3.5-2B checks whether to call `set_watch`
+or `clear_watch`; when it calls one, the look is cancelled. Other questions
+skip that check: given only the action tools, the 2B called `set_watch` for
+"what does the sign say" and "how many bullets" in 7 of 8 replayed questions. This replaced a router that tried
 `read_text` or `query_state` first: in 287 logged questions, 84% ended in
 look anyway, and half of those had first taken a detour that found nothing.
 `--route-first` brings back the old path, for comparing the two.

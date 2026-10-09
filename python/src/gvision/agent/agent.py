@@ -47,6 +47,20 @@ Current state: {state}"""
 ACTIONS = ("set_watch", "clear_watch")
 """What the 2B model still decides when look answers the questions."""
 
+ASKS_ACTION = re.compile(
+    r"\b(where|find|show me|highlight|locate|point (out|to|at)|watch for|keep an eye|stop|clear (it|that|the)"
+    r"|never ?mind|found it)\b"
+    r"|^\W*(is|are) there\b")
+"""Requests that may want set_watch or clear_watch. Anything else goes to look
+without asking Qwen: given only the action tools, the 2B called set_watch for
+"what does the sign say" and "how many bullets", cancelling look (7 of 8
+replayed questions)."""
+
+
+def asks_action(request: str) -> bool:
+    return bool(ASKS_ACTION.search(request.lower()))
+
+
 PAST = re.compile(r"\b(just|was|were|happened|hit|did|earlier|before|ago|missed|that was)\b")
 
 
@@ -163,13 +177,22 @@ class Agent:
 
     async def look_first(self, request: str) -> Answer:
         """Evidence-first: look answers questions, with OCR text and tracked
-        objects attached; the 2B model only picks actions, at the same time."""
+        objects attached. Only a request that may want an action (find, where,
+        show me, stop) also asks the 2B model, at the same time."""
+        args = {"question": request, "seconds": look_back(request)}
+        if not asks_action(request):
+            steps = [Step(kind="llm", title="A question: look answers",
+                          detail="no find, where, show or stop in it, so no action check; "
+                                 "look answers with what OCR and the tracker know")]
+            look, ms = await self._timed_look(args)
+            steps.append(self.tools.step("look", args, look, ms))
+            text = look.speak or "I couldn't see that right now."
+            return self.with_text(Answer(text, look.refs, ["look"], {"tools": ms}, steps=steps), [look])
         t0 = time.perf_counter()
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": ACTION_PROMPT.format(state=json.dumps(self.world.snapshot()))},
             {"role": "user", "content": request},
         ]
-        args = {"question": request, "seconds": look_back(request)}
         router = asyncio.ensure_future(self.qwen.chat(messages, tools=self.tools.action_specs))
         looking = asyncio.ensure_future(self._timed_look(args))
         try:
