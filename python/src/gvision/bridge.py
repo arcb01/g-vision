@@ -30,6 +30,8 @@ class Bridge:
         self.port = port
         self._clients: set[ServerConnection] = set()
         self._handlers: list[Handler] = []
+        self.edge: Callable[[ServerConnection], Awaitable[None]] | None = None
+        """Serves the gaming PC on ``/edge`` in two-PC mode (``gvision.link``)."""
 
     def on_message(self, handler: Handler) -> None:
         self._handlers.append(handler)
@@ -44,6 +46,12 @@ class Bridge:
             websockets.broadcast(self._clients, dump(msg))
 
     async def _serve_client(self, ws: ServerConnection) -> None:
+        if ws.request is not None and ws.request.path.startswith("/edge"):
+            if self.edge is None:
+                await ws.close(1008, "this backend does not take a gaming PC (start it with --source edge)")
+                return
+            await self.edge(ws)
+            return
         log.info("app connected from %s", ws.remote_address)
         self._clients.add(ws)
         try:
@@ -62,6 +70,8 @@ class Bridge:
             log.info("app disconnected")
 
     async def run(self, stop: asyncio.Event) -> None:
-        async with serve(self._serve_client, self.host, self.port):
+        # Frames are a few hundred KB each; the default 1 MB cap is fine for
+        # them, but full-screen JPEGs of busy scenes can go past it.
+        async with serve(self._serve_client, self.host, self.port, max_size=16 * 2**20):
             log.info("bridge listening on ws://%s:%d", self.host, self.port)
             await stop.wait()

@@ -17,7 +17,9 @@ and a scripted answer so the overlay can be worked on without a GPU.
 python/            Perception, agent and audio processes (package: gvision)
   src/gvision/
     protocol/      Message schema: source of truth for Python <-> Electron
-    bridge.py      Local WebSocket server the Electron app connects to
+    bridge.py      WebSocket server the Electron app connects to (and the gaming PC, on /edge)
+    link.py        Two-PC mode, AI server end: frames, questions and answers from/to the gaming PC
+    edge.py        Two-PC mode, gaming PC end: screen capture, push-to-talk and playback
     demo.py        Synthetic objects and answers (stand-in for perception + agent)
     perception/
       capture.py   dxcam screen capture (latest frame only) or a video file
@@ -50,7 +52,8 @@ python/            Perception, agent and audio processes (package: gvision)
       tts.py       Kokoro-82M on the CPU (ONNX Runtime)
 app/               Electron app: transparent overlay + control panel
   main.js          Owns the bridge connection, validates and forwards messages
-  services.js      Starts and stops llama-server and the Python backend
+  services.js      Starts and stops llama-server and the Python backend (or the edge, on a gaming PC)
+  remote.js        Two-PC mode: the AI server's control server and the gaming PC's client
   settings.js      The panel's Settings tab: saved in gvision.config.json, passed as backend flags
   models.js        Vision models for Settings > Vision: download from Hugging Face, run as a second llama-server
   conversation.js  The panel's Log tab: questions, answers and screenshots in logs/conversation/
@@ -145,6 +148,42 @@ The control panel has three tabs:
   `gvision.config.json`. The dim strength applies at once; the rest when the
   backend restarts (the tab offers a **Restart backend** button). A flag
   written by hand in `python.args` wins over the same setting.
+
+## Two PCs: one plays, the other thinks
+
+With a second PC on the same network, the models can run there so they don't
+share the GPU (or its VRAM) with the game. Install G-VISION on both PCs as
+above; the gaming PC doesn't need the llama.cpp folder.
+
+1. On the PC that runs the models: **Settings > Network > This PC is: AI
+   server**. G-VISION restarts without the overlay, and its **Home** tab shows
+   the address to type on the other PC. Windows Firewall asks to allow
+   `python.exe` and `electron.exe` the first time: allow them on private
+   networks (ports 8765 and 8770). `G-VISION.bat --server` starts it as an AI
+   server whatever Settings says, e.g. from a shortcut in `shell:startup`.
+2. On the gaming PC: **This PC is: Gaming PC**, then type that address in
+   **AI server address** and press **Test connection**, then **Restart
+   G-VISION**.
+
+The gaming PC then runs only the overlay, the panel and a small screen and
+voice link (`python -m gvision --edge ws://<server>:8765/edge`): it captures
+the screen with dxcam (so the overlay stays out of the frames), sends 10 JPEG
+frames a second (about 15-30 Mbit/s at 1080p, use a cable rather than Wi-Fi),
+records your question while the push-to-talk key is held and plays the
+answer. Everything else runs on the AI server: YOLOE, OCR, scene memory,
+speech-to-text, Qwen, the vision model, the wikis and Kokoro, which makes the
+voice there and sends it back sentence by sentence.
+
+From the gaming PC's panel you still control everything. **Home** shows both
+PCs' services (restart and stop work on the AI server's too). **Settings**
+tags the voice and vision settings that live on the AI server and saves them
+there, and picking a vision model downloads it on the AI server. The session
+picker shows which wikis the AI server has indexed. **Update and restart**
+updates both PCs, and Home warns if they run different versions. The
+push-to-talk key, dim strength and network settings are each PC's own.
+
+The AI server's control server (port 8770) and bridge (port 8765) have no
+password: use this on a home network you trust.
 
 Other ways to start: `G-VISION.bat --demo` (or `npm start -- --demo`) runs the
 synthetic demo without Qwen, and `npm start -- --no-services` only opens the

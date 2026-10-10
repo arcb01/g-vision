@@ -69,6 +69,8 @@
           </header>
 
           <div class="grid">
+            <article class="card network-card" id="network-card" hidden></article>
+
             <article class="card now" id="now">
               <div class="orb-wrap"><div id="orb" class="orb idle"><span></span><span></span><span></span></div></div>
               <div class="now-body">
@@ -147,6 +149,10 @@
           <div id="restart-banner" class="banner" hidden>
             <div><strong>Restart the backend to apply.</strong> <span>Voice and vision settings load when it starts.</span></div>
             <button id="restart-backend" class="btn btn-primary"><svg><use href="#i-refresh"/></svg>Restart backend</button>
+          </div>
+          <div id="relaunch-banner" class="banner" hidden>
+            <div><strong>Restart G-VISION to apply.</strong> <span>It connects to the AI server when it starts.</span></div>
+            <button id="relaunch" class="btn btn-primary"><svg><use href="#i-refresh"/></svg>Restart G-VISION</button>
           </div>
           <div id="settings-error" class="banner banner-bad" hidden></div>
           <div id="settings-form" class="settings"></div>

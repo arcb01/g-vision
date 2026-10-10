@@ -10,6 +10,7 @@ let answer = null;
 let log = [];
 let settings = null;
 let services = { managed: false, services: [] };
+let network = null; // two-PC mode: what this PC is and how the other one is doing
 
 const TOOL_NAMES = {
   set_watch: 'Find and highlight',
@@ -105,11 +106,14 @@ function kbdList(key) {
 
 let isConnected = false;
 
-function setConnection({ connected }) {
+function setConnection({ connected, url }) {
   isConnected = connected;
   renderWikiStatus();
   $('#conn').classList.toggle('ok', connected);
-  $('.conn-text').textContent = connected ? 'Connected to the backend' : 'Waiting for the backend';
+  const role = network ? network.role : 'standalone';
+  $('.conn-text').textContent = role === 'gaming'
+    ? (connected ? 'Connected to the AI server' : url ? 'Waiting for the AI server' : 'No AI server set')
+    : connected ? 'Connected to the backend' : 'Waiting for the backend';
 }
 
 function renderServices(state) {
@@ -140,8 +144,10 @@ function renderServices(state) {
         onClick();
       },
     }, icon(iconName), text));
-    button(running ? 'Restart' : 'Start', 'refresh', () => window.gvision.restartService(s.name));
-    if (running) button('Stop', 'x', () => window.gvision.stopService(s.name));
+    if (!s.remote) {
+      button(running ? 'Restart' : 'Start', 'refresh', () => window.gvision.restartService(s.name));
+      if (running) button('Stop', 'x', () => window.gvision.stopService(s.name));
+    }
     return el('div', { class: 'service' },
       el('span', { class: `status-dot ${s.state}`, title: s.state }),
       el('div', {},
@@ -151,6 +157,85 @@ function renderServices(state) {
   }));
   mini.replaceChildren(...state.services.map((s) => el('div', { class: 'mini' },
     el('span', { class: `status-dot ${s.state}` }), s.label.replace(/ \(.*\)$/, ''))));
+}
+
+// --- Two-PC mode -------------------------------------------------------------------
+
+const ROLE_TITLES = { gaming: 'Two PCs: this is the gaming PC', server: 'Two PCs: this is the AI server' };
+
+function netRow(state, name, ...value) {
+  return el('div', { class: 'net-row' },
+    el('span', { class: `status-dot ${state}` }),
+    el('span', { class: 'net-name', text: name }),
+    el('span', { class: 'net-value' }, ...value));
+}
+
+function addressList(n) {
+  const list = n.addresses.map((a) => a.address);
+  if (!list.length) return [el('span', { class: 'net-bad', text: 'This PC has no network address. Is it connected?' })];
+  return list.flatMap((a, i) => (i ? [' or ', el('code', { text: a })] : [el('code', { text: a })]));
+}
+
+function renderNetwork() {
+  const card = $('#network-card');
+  const n = network;
+  document.querySelector('[data-tab="sessions"]').hidden = Boolean(n && n.role === 'server');
+  if (!n || n.role === 'standalone') {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  const rows = [];
+  const notes = [];
+  if (n.role === 'gaming') {
+    const srv = n.server;
+    if (!srv.host) {
+      rows.push(netRow('stopped', 'AI server', 'Not set. Type its address in Settings > Network.'));
+    } else {
+      rows.push(netRow(srv.ok ? 'ready' : 'failed', 'AI server', el('code', { text: srv.host }), ' ',
+        srv.ok ? (srv.backend ? 'connected, models running' : 'connected, backend starting') : srv.error || 'not reachable'));
+    }
+    const edge = services.services.find((s) => s.name === 'edge');
+    if (edge) rows.push(netRow(edge.state, 'Screen and voice', edge.state === 'ready' ? 'streaming to the AI server' : edge.detail || edge.state));
+    if (srv.ok && !srv.sameVersion) {
+      notes.push(el('div', { class: 'net-warn' },
+        el('strong', { text: 'The two PCs run different versions. ' }),
+        `This PC is on ${n.build || 'an unknown version'}, the AI server on ${srv.build}. Press Update and restart: it updates both.`));
+    }
+  } else {
+    rows.push(netRow('ready', 'This PC\'s address', ...addressList(n)));
+    rows.push(n.peer
+      ? netRow('ready', 'Gaming PC', 'connected from ', el('code', { text: n.peer.address }))
+      : netRow('starting', 'Gaming PC', 'waiting for it'));
+    if (n.error) notes.push(el('div', { class: 'net-warn net-bad', text: n.error }));
+    notes.push(el('div', { class: 'net-note' },
+      'On the gaming PC, set Settings > Network > AI server address to this PC\'s address. ',
+      `If it can't connect, allow G-VISION (electron.exe and python.exe) through Windows Firewall here, ports ${n.bridgePort} and ${n.controlPort}.`));
+  }
+  card.replaceChildren(
+    el('div', { class: 'card-head' }, el('h2', { text: ROLE_TITLES[n.role] }),
+      el('button', { class: 'btn btn-small btn-ghost', 'data-goto': 'settings', onclick: () => showTab('settings') }, icon('settings'), 'Network settings')),
+    el('div', { class: 'net-rows' }, ...rows),
+    ...notes);
+}
+
+function setNetwork(n) {
+  const roleChanged = !network || network.role !== n.role;
+  // The AI server came back: its settings can be edited again.
+  const serverBack = n.server && n.server.ok && !(network && network.server && network.server.ok);
+  network = n;
+  if (serverBack && settings) {
+    window.gvision.getSettings().then((s) => {
+      settings = s;
+      renderSettings();
+    });
+  }
+  renderNetwork();
+  if (roleChanged) {
+    window.gvision.getConnection().then(setConnection);
+    renderIdleHint();
+    renderSettings();
+  }
 }
 
 // --- Home: now, performance -----------------------------------------------------
@@ -178,6 +263,11 @@ function renderVoice({ state, transcript }) {
 }
 
 function renderIdleHint() {
+  if (network && network.role === 'server') {
+    $('#heard').className = 'heard';
+    $('#heard').textContent = 'Questions are asked on the gaming PC. This PC answers them.';
+    return;
+  }
   const key = settings ? settings.values.pttKey : 'alt+3';
   $('#heard').className = 'heard';
   $('#heard').replaceChildren('Hold ', ...kbdList(key), ' and ask about what’s on screen.');
@@ -673,7 +763,7 @@ let restartNeeded = false;
 
 function setRestartNeeded(on) {
   restartNeeded = on;
-  const backend = services.managed && services.services.some((s) => s.name === 'backend');
+  const backend = services.managed && services.services.some((s) => s.name === 'backend' || s.name === 'server:backend');
   $('#restart-banner').hidden = !on;
   $('#restart-backend').hidden = !backend;
   $('#settings-dot').hidden = !on;
@@ -693,7 +783,9 @@ async function save(key, value, tick) {
     clearTimeout(tick.timer);
     tick.timer = setTimeout(() => tick.classList.remove('show'), 1400);
   }
-  if (!spec.live) setRestartNeeded(true);
+  // A gaming PC restarts its own screen and voice link for a new key.
+  const restartsItself = spec.side === 'local' || (settings.role === 'gaming' && spec.side === 'gaming');
+  if (!spec.live && !restartsItself) setRestartNeeded(true);
   if (key === 'pttKey') renderIdleHint();
   syncDependent();
 }
@@ -769,8 +861,67 @@ function visionPicker(spec, value, tick) {
   return sel;
 }
 
+// This PC is: changing it restarts the whole app in the new role.
+function rolePicker(spec, value, tick) {
+  const sel = el('select', { 'aria-label': spec.label }, ...spec.choices.map(([v, label]) => el('option', { value: v, text: label })));
+  sel.value = value;
+  sel.addEventListener('change', async () => {
+    const r = await window.gvision.saveSettings({ role: sel.value });
+    if (!r.ok) {
+      toast(r.error, true);
+      sel.value = settings.values.role;
+      return;
+    }
+    settings.values = r.values;
+    tick.classList.add('show');
+    if (sel.value === 'gaming' && !r.values.serverHost) {
+      // It needs the address first; the banner restarts once it is typed.
+      renderSettings();
+      $('#relaunch-banner').hidden = false;
+      toast('Now type the AI server\'s address, then restart');
+      return;
+    }
+    toast(`Restarting G-VISION as ${spec.choices.find(([v]) => v === sel.value)[1]}…`);
+    setTimeout(() => window.gvision.relaunch(), 600);
+  });
+  return sel;
+}
+
+// AI server address, with a button that checks it can be reached.
+function hostInput(spec, value, tick) {
+  const input = el('input', { class: 'text-input', type: 'text', value, placeholder: spec.placeholder || '', spellcheck: 'false', 'aria-label': spec.label });
+  const result = el('div', { class: 'test-result', id: 'test-result' });
+  const test = el('button', { class: 'btn btn-small' }, icon('refresh'), 'Test connection');
+  test.addEventListener('click', async () => {
+    test.disabled = true;
+    result.className = 'test-result';
+    result.textContent = 'Testing…';
+    const r = await window.gvision.testConnection(input.value);
+    test.disabled = false;
+    if (!r.ok) {
+      result.className = 'test-result bad';
+      result.textContent = r.error;
+      return;
+    }
+    result.className = `test-result ${r.sameVersion && r.backend ? 'ok' : ''}`;
+    result.textContent = [
+      `Reached the AI server in ${r.ms} ms.`,
+      r.backend ? 'Its models are running.' : 'Its backend isn\'t running yet (it may still be starting).',
+      r.sameVersion ? '' : `It runs another version (${r.build}): press Update and restart.`,
+    ].filter(Boolean).join(' ');
+  });
+  input.addEventListener('change', async () => {
+    const before = settings.values.serverHost;
+    await save(spec.key, input.value, tick);
+    if (settings.values.serverHost !== before && settings.values.role === 'gaming') $('#relaunch-banner').hidden = false;
+  });
+  return el('div', { class: 'host-wrap' }, el('div', { class: 'head-actions' }, input, test), result);
+}
+
 function control(spec, value, tick) {
   if (spec.key === 'visionModel') return visionPicker(spec, value, tick);
+  if (spec.key === 'role') return rolePicker(spec, value, tick);
+  if (spec.key === 'serverHost') return hostInput(spec, value, tick);
   switch (spec.type) {
     case 'toggle': {
       const sw = el('button', { class: 'switch', role: 'switch', 'aria-checked': String(value), 'aria-label': spec.label });
@@ -854,6 +1005,30 @@ function hotkeyRecorder(spec, value, tick) {
   return btn;
 }
 
+// Which settings this PC shows: an AI server has no overlay or push-to-talk
+// key of its own, and only a gaming PC needs the server's address.
+function shown(spec) {
+  const role = settings.role || 'standalone';
+  if (spec.key === 'serverHost') return role === 'gaming' || settings.values.role === 'gaming';
+  if (role === 'server') return spec.side !== 'gaming';
+  return true;
+}
+
+// A gaming PC edits the AI server's voice and vision settings over the
+// network; each is tagged, and they lock while the server can't be reached.
+function groupNote(specs) {
+  if (settings.role !== 'gaming' || !specs.some((s) => s.side === 'server')) return null;
+  const remote = settings.serverSettings || {};
+  if (remote.ok) return null;
+  return el('div', { class: 'group-note bad', text: `Settings tagged AI server live on that PC, which can't be reached: ${remote.error || 'not set up'}` });
+}
+
+function roleDetails(spec) {
+  const id = settings.values.role;
+  const forced = settings.forced ? ' Started with --server, so this PC is an AI server whatever is picked here.' : '';
+  return el('div', { class: 'field-help', text: `${spec.details[id] || ''}${forced}` });
+}
+
 function renderSettings() {
   if (!settings) return;
   $('#settings-file').textContent = `Saved to ${settings.file}`;
@@ -862,17 +1037,23 @@ function renderSettings() {
   err.textContent = settings.error ? `Can't read the config file, so these are the defaults: ${settings.error}` : '';
   const groups = new Map();
   for (const spec of settings.spec) {
+    if (!shown(spec)) continue;
     if (!groups.has(spec.group)) groups.set(spec.group, []);
     groups.get(spec.group).push(spec);
   }
+  const offline = settings.role === 'gaming' && !(settings.serverSettings && settings.serverSettings.ok);
   $('#settings-form').replaceChildren(...[...groups].map(([name, specs]) => el('section', { class: 'card group' },
     el('h2', { text: name }),
+    groupNote(specs),
     ...specs.map((spec) => {
       const tick = el('span', { class: 'saved-tick', text: 'Saved' });
-      return el('div', { class: 'field', 'data-field': spec.key },
+      const off = offline && spec.side === 'server';
+      return el('div', { class: `field${off ? ' disabled locked' : ''}`, 'data-field': spec.key, inert: off },
         el('div', {},
-          el('div', { class: 'field-label' }, spec.label, tick),
+          el('div', { class: 'field-label' }, spec.label,
+            settings.role === 'gaming' && spec.side === 'server' ? el('span', { class: 'field-tag', text: 'AI server' }) : null, tick),
           el('div', { class: 'field-help', text: spec.help }),
+          spec.key === 'role' ? roleDetails(spec) : null,
           ...(spec.key === 'visionModel' ? [
             el('div', { class: 'field-help vision-details', id: 'vision-details' }),
             el('div', { class: 'vision-progress', id: 'vision-progress', hidden: true },
@@ -887,6 +1068,11 @@ function renderSettings() {
   renderVisionDetails();
 }
 
+$('#relaunch').addEventListener('click', () => {
+  toast('Restarting G-VISION…');
+  window.gvision.relaunch();
+});
+
 $('#restart-backend').addEventListener('click', () => {
   window.gvision.restartService('backend');
   setRestartNeeded(false);
@@ -898,8 +1084,20 @@ $('#restart-backend').addEventListener('click', () => {
 
 window.gvision.onConnection(setConnection);
 window.gvision.getConnection().then(setConnection);
-window.gvision.onServices(renderServices);
+window.gvision.onServices((state) => {
+  renderServices(state);
+  renderNetwork();
+});
 window.gvision.getServices().then(renderServices);
+window.gvision.onNetwork(setNetwork);
+window.gvision.getNetwork().then(setNetwork);
+window.gvision.onError((text) => toast(text, true));
+// The gaming PC changed this AI server's settings.
+window.gvision.onSettingsChanged((values) => {
+  if (!settings) return;
+  settings.values = { ...settings.values, ...values };
+  renderSettings();
+});
 window.gvision.getVisionModels().then((m) => {
   visionModels = m;
   if (settings) renderVisionDetails();

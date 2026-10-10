@@ -2,6 +2,11 @@
 // everything: Qwen in llama-server and the Python backend (bridge, perception,
 // agent, audio). Paths and arguments come from gvision.config.json at the repo
 // root, falling back to the defaults below.
+//
+// Which processes depends on what this PC is (Settings > Network): standalone
+// runs them all; an AI server runs them all too, with the backend taking its
+// screen and voice from the network; a gaming PC runs only the edge, which
+// streams them to the AI server.
 'use strict';
 
 const fs = require('node:fs');
@@ -40,6 +45,10 @@ const DEFAULTS = {
     port: 8765,
     readyTimeoutS: 120,
   },
+  network: {
+    // The AI server's control server (remote.js); the bridge uses python.port.
+    controlPort: 8770,
+  },
 };
 
 const MODES = {
@@ -75,7 +84,9 @@ function pythonCandidates(pythonDir, env = process.env) {
 
 // Defaults <- config file <- mode (from the command line). Relative paths in
 // the llama section resolve against llama.dir, the Python exe against python/.
-function resolveConfig({ fileConfig = {}, mode = null, configDir = REPO_ROOT, env = process.env } = {}) {
+// `role` overrides Settings > Network (the launcher's --server). The demo is
+// always standalone.
+function resolveConfig({ fileConfig = {}, mode = null, configDir = REPO_ROOT, env = process.env, role = null } = {}) {
   let cfg = merge(DEFAULTS, fileConfig);
   if (mode) {
     if (!MODES[mode]) throw new Error(`unknown mode "${mode}" (expected ${Object.keys(MODES).join(', ')})`);
@@ -104,6 +115,9 @@ function resolveConfig({ fileConfig = {}, mode = null, configDir = REPO_ROOT, en
     vision,
     python: { ...cfg.python, dir: pythonDir, ...resolvePython(cfg.python.exe, pythonDir, env) },
     settings,
+    role: mode === 'demo' ? 'standalone' : role || settings.role,
+    serverHost: settings.serverHost,
+    controlPort: cfg.network.controlPort,
   };
 }
 
@@ -118,10 +132,10 @@ function resolvePython(exe, pythonDir, env) {
   };
 }
 
-function loadConfig(mode = null) {
+function loadConfig(mode = null, role = null) {
   let fileConfig = {};
   if (fs.existsSync(CONFIG_FILE)) fileConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-  return resolveConfig({ fileConfig, mode });
+  return resolveConfig({ fileConfig, mode, role });
 }
 
 function llamaCommand(llama, name = 'qwen', label = 'Qwen (llama-server)') {
@@ -160,6 +174,25 @@ function pythonCommand(py, llamaPort, settings = null, visionPort = null, vision
     args.push('--vision-model', visionModel);
   }
   return { name: 'backend', label: 'Python backend', exe: py.exe, args, cwd: py.dir, notFound: py.notFound };
+}
+
+// AI server: the backend takes the screen and voice from the gaming PC and
+// listens on the network for it. Flags already in python.args win.
+function serverPython(py) {
+  const args = [...py.args];
+  if (!args.includes('--source')) args.push('--source', 'edge');
+  if (!args.includes('--host')) args.push('--host', '0.0.0.0');
+  return { ...py, args };
+}
+
+function bridgeUrl(host, port) {
+  return `ws://${host.includes(':') ? `[${host}]` : host}:${port}`;
+}
+
+// Gaming PC: capture, push-to-talk and playback, streamed to the AI server.
+function edgeCommand(py, host, settings) {
+  const args = ['-m', 'gvision', '--edge', `${bridgeUrl(host, py.port)}/edge`, '--ptt-key', settings.pttKey];
+  return { name: 'edge', label: 'Screen and voice link', exe: py.exe, args, cwd: py.dir, notFound: py.notFound };
 }
 
 function portOpen(port, host = '127.0.0.1', timeoutMs = 500) {
@@ -261,9 +294,12 @@ function killTree(pid) {
 // One child process: spawn, wait until `isReady()` passes, keep the last log
 // lines for the panel, stop the whole process tree on quit.
 class Service extends EventEmitter {
-  constructor({ name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound = null, port = null, match = null }) {
+  // onLine(line, service): sees each output line, e.g. to follow a process
+  // whose readiness shows only in its log.
+  constructor({ name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound = null, port = null, match = null,
+    onLine = null }) {
     super();
-    Object.assign(this, { name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound, port, match });
+    Object.assign(this, { name, label, exe, args, cwd, env, isReady, readyTimeoutS, logDir, notFound, port, match, onLine });
     this.state = 'stopped';
     this.detail = '';
     this.child = null;
@@ -320,7 +356,11 @@ class Service extends EventEmitter {
     this.child = child;
     const onData = (buf) => {
       if (log) log.write(buf);
-      for (const line of String(buf).split(/\r?\n/)) if (line.trim()) this.tail.push(line);
+      for (const line of String(buf).split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        this.tail.push(line);
+        if (this.onLine && this.child === child) this.onLine(line, this);
+      }
       if (this.tail.length > 40) this.tail.splice(0, this.tail.length - 40);
     };
     child.stdout.on('data', onData);
@@ -411,9 +451,11 @@ function visionModelName(cfg) {
 
 // The command line for each service name, from a (re)loaded config.
 function serviceCommands(cfg) {
+  if (cfg.role === 'gaming') return cfg.serverHost ? { edge: edgeCommand(cfg.python, cfg.serverHost, cfg.settings) } : {};
+  const py = cfg.role === 'server' ? serverPython(cfg.python) : cfg.python;
   const cmds = {
     qwen: llamaCommand(cfg.llama),
-    backend: pythonCommand(cfg.python, cfg.llama.port, cfg.settings, cfg.vision && cfg.vision.port, visionModelName(cfg)),
+    backend: pythonCommand(py, cfg.llama.port, cfg.settings, cfg.vision && cfg.vision.port, visionModelName(cfg)),
   };
   if (cfg.vision) cmds.vision = visionCommand(cfg.vision);
   return cmds;
@@ -435,15 +477,37 @@ function visionService(cfg, logDir = path.join(REPO_ROOT, 'logs')) {
   return llamaService(visionCommand(cfg.vision), cfg.vision, logDir);
 }
 
+// The edge has no port to probe: it is ready once its log says it is
+// streaming, and back to starting while it reconnects.
+function edgeService(cfg, logDir) {
+  const host = cfg.serverHost;
+  return new Service({
+    ...edgeCommand(cfg.python, host, cfg.settings),
+    env: { PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
+    isReady: async () => false,
+    onLine: (line, s) => {
+      if (/edge: connected/.test(line)) s._set('ready', `streaming to ${host}`);
+      else if (/edge: (can't reach|link .* lost)/.test(line) && s.state !== 'starting') {
+        s._set('starting', `can't reach the AI server at ${host}; retrying`);
+      }
+    },
+    match: '--edge',
+    readyTimeoutS: 365 * 86400,
+    logDir,
+  });
+}
+
 function createServices(cfg, { logDir = path.join(REPO_ROOT, 'logs') } = {}) {
+  if (cfg.role === 'gaming') return cfg.python.enabled && cfg.serverHost ? [edgeService(cfg, logDir)] : [];
   const services = [];
   if (cfg.llama.enabled) services.push(llamaService(llamaCommand(cfg.llama), cfg.llama, logDir));
   if (cfg.vision) services.push(visionService(cfg, logDir));
   if (cfg.python.enabled) {
     const port = cfg.python.port;
+    const py = cfg.role === 'server' ? serverPython(cfg.python) : cfg.python;
     services.push(
       new Service({
-        ...pythonCommand(cfg.python, cfg.llama.port, cfg.settings, cfg.vision && cfg.vision.port, visionModelName(cfg)),
+        ...pythonCommand(py, cfg.llama.port, cfg.settings, cfg.vision && cfg.vision.port, visionModelName(cfg)),
         env: { PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
         isReady: () => portOpen(port),
         port,
@@ -463,7 +527,9 @@ module.exports = {
   REPO_ROOT,
   WIKI_DIR,
   Service,
+  bridgeUrl,
   createServices,
+  edgeCommand,
   llamaCommand,
   loadConfig,
   merge,
