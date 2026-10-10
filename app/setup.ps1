@@ -32,7 +32,8 @@ function Has($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 # Runs a program, showing its output, and throws if it fails.
 # No named parameter, so flags like -C or -e pass straight through.
 function Run {
-  $exe, $rest = $args
+  $exe = $args[0]
+  $rest = @($args | Select-Object -Skip 1)  # an array even with one argument
   & $exe @rest
   if ($LASTEXITCODE -ne 0) { throw "$($args -join ' ') failed (exit code $LASTEXITCODE)" }
 }
