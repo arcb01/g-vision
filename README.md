@@ -104,12 +104,14 @@ first run into `python/models/` and the current folder; neither is committed.
 ## Start everything with one click (Windows)
 
 Double-click `G-VISION.bat` in the repository folder (right-click it and pick
-*Send to > Desktop (create shortcut)* to get a desktop icon). On a fresh PC it
-needs nothing installed by hand: when they are missing it downloads a
-portable Node.js into `runtime/` (no installer or admin rights), installs
-Python 3.12 with winget, creates `python/.venv` with the CUDA build of
-PyTorch, and downloads Electron. Clone the repository with git rather than
-downloading a ZIP, or it cannot update itself. It then pulls
+*Send to > Desktop (create shortcut)* to get a desktop icon). On a fresh PC
+nothing needs installing by hand, not even Git, and nothing asks for admin
+rights: `app/setup.ps1` downloads portable copies of Node.js, Git and Python
+3.12 into `runtime/` when they are missing, turns a ZIP download into a git
+checkout so it can update itself, creates `python/.venv` with the CUDA build
+of PyTorch and downloads Electron. The first launch downloads a few GB; its
+messages are also written to `logs/setup.log`. CI runs this first launch on a
+clean Windows machine on every pull request. On every launch it pulls
 the latest version with `git pull --ff-only` and reinstalls the app's npm
 packages or the Python package (`pip install -e ".[dev,perception,voice]"`)
 only when `app/package-lock.json` or `python/pyproject.toml` changed; if you

@@ -35,3 +35,40 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - run: npm ci
       - run: npm test
+
+  # A fresh Windows PC: G-VISION.bat on a ZIP-like copy (no .git) with no
+  # Node.js, Python or Git on PATH must set everything up by itself, and a
+  # second launch must find it all in place.
+  windows-setup:
+    runs-on: windows-latest
+    env:
+      GVISION_SETUP_ONLY: "1"
+      GVISION_NO_GPU: "1"
+      GVISION_EXTRAS: dev
+      GVISION_REPO: https://github.com/${{ github.repository }}.git
+      GVISION_BRANCH: ${{ github.head_ref || github.ref_name }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: First launch on a clean PC
+        shell: cmd
+        run: |
+          rmdir /s /q .git
+          set "PATH=C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0"
+          call G-VISION.bat
+      - name: Everything is in place
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-Content logs\setup.log -Tail 40
+          runtime\node\node.exe --version
+          if (-not (Test-Path app\node_modules\electron\dist\electron.exe)) { throw 'no electron.exe' }
+          python\.venv\Scripts\python.exe -c "import gvision, pydantic; print('gvision OK')"
+          if ($LASTEXITCODE) { throw 'gvision does not import' }
+          runtime\git\cmd\git.exe -c safe.directory=* status --short --branch
+          if ($LASTEXITCODE) { throw 'not a git checkout' }
+      - name: Second launch reuses the setup
+        shell: cmd
+        run: |
+          set "PATH=C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0"
+          call G-VISION.bat
