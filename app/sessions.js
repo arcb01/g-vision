@@ -115,20 +115,29 @@ class SessionStore {
   }
 }
 
-// The picker's list: the known games, then custom games used before, each
-// with what the backend's wiki index says (<wikiDir>/<id>.json).
-function gameList(known, wikiDir) {
-  const index = new Map();
-  if (fs.existsSync(wikiDir)) {
-    for (const f of fs.readdirSync(wikiDir)) {
-      if (!f.endsWith('.json')) continue;
-      try {
-        const meta = JSON.parse(fs.readFileSync(path.join(wikiDir, f), 'utf8'));
-        if (meta && meta.game) index.set(meta.game, meta);
-      } catch {
-        // half-written: skip
-      }
+// What the backend's wiki indexes say (<wikiDir>/<id>.json), one entry per game.
+function wikiIndexes(wikiDir) {
+  const out = [];
+  if (!fs.existsSync(wikiDir)) return out;
+  for (const f of fs.readdirSync(wikiDir)) {
+    if (!f.endsWith('.json')) continue;
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(wikiDir, f), 'utf8'));
+      if (meta && meta.game) out.push(meta);
+    } catch {
+      // half-written: skip
     }
+  }
+  return out;
+}
+
+// The picker's list: the known games, then custom games used before, each
+// with what its wiki index says. `indexes` is a wiki folder, or the indexes
+// themselves (from the AI server in two-PC mode, where the wikis live).
+function gameList(known, indexes) {
+  const index = new Map();
+  for (const meta of Array.isArray(indexes) ? indexes : wikiIndexes(indexes)) {
+    if (meta && typeof meta.game === 'string') index.set(meta.game, meta);
   }
   const view = (g) => {
     const meta = index.get(g.id);
@@ -141,4 +150,4 @@ function gameList(known, wikiDir) {
   return out;
 }
 
-module.exports = { SessionStore, checkGame, gameList, slug };
+module.exports = { SessionStore, checkGame, gameList, slug, wikiIndexes };

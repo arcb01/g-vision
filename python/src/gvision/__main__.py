@@ -6,6 +6,11 @@
                                                   reading on-screen text (RapidOCR) and
                                                   scene memory ("what just hit me?")
     python -m gvision --check-exclusion         is the overlay kept out of capture?
+
+Two PCs (the gaming PC plays, the AI server thinks):
+
+    python -m gvision --live --agent --source edge --host 0.0.0.0     on the AI server
+    python -m gvision --edge ws://<server>:8765/edge                    on the gaming PC
 """
 
 from __future__ import annotations
@@ -23,6 +28,8 @@ log = logging.getLogger("gvision")
 
 
 async def _amain(args: argparse.Namespace) -> int:
+    if args.edge:
+        return await _edge(args)
     bridge = Bridge(args.host, args.port)
     stop = asyncio.Event()
 
@@ -37,7 +44,14 @@ async def _amain(args: argparse.Namespace) -> int:
 
         tasks.append(run_demo(bridge, stop))
     elif args.live:
-        tasks.append(_live(args, bridge, stop))
+        link = None
+        if args.source == "edge":
+            from gvision.link import EdgeLink
+
+            link = EdgeLink()
+            bridge.edge = link.serve
+            log.info("two-PC mode: waiting for the gaming PC on ws://%s:%d/edge", args.host, args.port)
+        tasks.append(_live(args, bridge, stop, link))
     elif args.check_exclusion:
         from gvision.perception.capture import open_source
         from gvision.perception.exclusion_check import run_exclusion_check
@@ -50,7 +64,26 @@ async def _amain(args: argparse.Namespace) -> int:
     return 1 if False in results else 0
 
 
-async def _live(args: argparse.Namespace, bridge: Bridge, stop: asyncio.Event) -> None:
+async def _edge(args: argparse.Namespace) -> int:
+    """The gaming PC in two-PC mode: capture, push-to-talk and playback only."""
+    from gvision.edge import Edge, Player
+    from gvision.perception.capture import open_source
+
+    recorder = player = None
+    if not args.no_mic:
+        from gvision.audio.mic import Recorder
+
+        recorder = Recorder()
+    if not args.no_tts:
+        player = Player()
+    source = open_source("screen" if args.source == "edge" else args.source)
+    edge = Edge(args.edge, source, args.ptt_key, fps=args.stream_fps, quality=args.jpeg_quality,
+                recorder=recorder, player=player)
+    await edge.run(asyncio.Event())
+    return 0
+
+
+async def _live(args: argparse.Namespace, bridge: Bridge, stop: asyncio.Event, link=None) -> None:
     from gvision.perception.capture import open_source
     from gvision.perception.detector import YoloeDetector
     from gvision.perception.live import LivePipeline, LiveSettings
@@ -58,7 +91,7 @@ async def _live(args: argparse.Namespace, bridge: Bridge, stop: asyncio.Event) -
     prompts = _split(args.prompts)
     watch = _split(args.watch if args.watch is not None else ("" if args.agent else "person"))
     prompts += [w for w in watch if w not in prompts]
-    source = open_source(args.source)
+    source = link.source if link else open_source(args.source)
     detector = await asyncio.to_thread(YoloeDetector, prompts, args.model, device=args.device)
     # With the agent, the spotlight follows every watch for as long as the
     # target is tracked, and only watched objects are drawn.
@@ -86,7 +119,7 @@ async def _live(args: argparse.Namespace, bridge: Bridge, stop: asyncio.Event) -
             events = EventLog(world)
             history.listeners.append(lambda f: events.update(f.ts))
             memory = (history, events)
-        jobs.append(_agent(args, bridge, world, stop, text, memory, screen))
+        jobs.append(_agent(args, bridge, world, stop, text, memory, screen, link))
     pipeline = LivePipeline(bridge, source, detector, settings, world=world)
     if screen:
         pipeline.frame_listeners.append(screen.offer)
@@ -112,7 +145,7 @@ async def _text_watcher(args: argparse.Namespace, bridge: Bridge, source):
 
 
 async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.Event, text=None, memory=None,
-                 screen=None) -> None:
+                 screen=None, link=None) -> None:
     from gvision.agent.agent import Agent
     from gvision.agent.qwen import QwenClient
     from gvision.agent.tools import ToolExecutor
@@ -150,7 +183,16 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
         from gvision.audio.tts import KokoroTTS
 
         tts = await asyncio.to_thread(KokoroTTS, args.voice, device=args.tts_device)
-    if not args.no_mic:
+        if link:  # synthesized here, played on the gaming PC
+            from gvision.link import RemoteVoice
+
+            tts = RemoteVoice(tts, link)
+    if link and not args.no_mic:
+        from gvision.audio.asr import load_asr
+
+        asr = await asyncio.to_thread(load_asr, args.asr, args.asr_device, args.whisper_model)
+        recorder = link.recorder
+    elif not args.no_mic:
         from gvision.audio.asr import load_asr
         from gvision.audio.mic import Recorder
 
@@ -162,6 +204,10 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
     try:
         if args.no_mic:
             await assistant.read_stdin(stop)
+            return
+        if link:  # the key is held on the gaming PC
+            link.on_ptt_down, link.on_ptt_up = assistant.ptt_down, assistant.ptt_up
+            await stop.wait()
             return
         from gvision.audio.ptt import PushToTalk
 
@@ -209,8 +255,12 @@ def main() -> None:
     mode.add_argument("--demo", action="store_true", help="stream synthetic objects and answers")
     mode.add_argument("--live", action="store_true", help="capture, detect and track real objects")
     mode.add_argument("--check-exclusion", action="store_true", help="verify the overlay is not captured")
+    mode.add_argument("--edge", metavar="URL", default=None,
+                      help="two-PC mode, gaming PC: stream the screen and voice to the AI server at "
+                           "ws://<server>:8765/edge")
     live = parser.add_argument_group("live")
-    live.add_argument("--source", default="screen", help="'screen', 'screen:<n>' or a video/image file")
+    live.add_argument("--source", default="screen",
+                      help="'screen', 'screen:<n>', a video/image file, or 'edge': frames from the gaming PC")
     live.add_argument("--prompts", default="person", help="comma-separated YOLOE text prompts")
     live.add_argument("--watch", default=None, help="comma-separated labels that always glow gold (default: person, none with --agent)")
     live.add_argument("--spotlight", action="store_true", help="also dim the screen around watched objects")
@@ -252,7 +302,10 @@ def main() -> None:
     agent.add_argument("--history-seconds", type=float, default=60.0, help="how much of the screen to remember")
     agent.add_argument("--narrate-every", type=float, default=25.0,
                        help="seconds between situation summaries by Qwen (0: off)")
-    parser.add_argument("--host", default=DEFAULT_HOST)
+    edge = parser.add_argument_group("edge (with --edge)")
+    edge.add_argument("--stream-fps", type=float, default=10.0, help="frames a second sent to the AI server")
+    edge.add_argument("--jpeg-quality", type=int, default=85, help="JPEG quality of the streamed frames")
+    parser.add_argument("--host", default=DEFAULT_HOST, help="0.0.0.0 to take a gaming PC on the network")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")

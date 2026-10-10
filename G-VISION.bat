@@ -2,7 +2,8 @@
 rem Double-click to start G-VISION: pulls the latest version (and reinstalls
 rem dependencies only when they changed), then opens the app, which starts
 rem Qwen (llama-server) and the Python backend itself and stops them when you
-rem close it. Logs go to logs\. Pass --demo for the synthetic demo without Qwen.
+rem close it. Logs go to logs\. Pass --demo for the synthetic demo without Qwen,
+rem or --server to start as the AI server for a gaming PC (see README).
 rem
 rem Everything below is one block so cmd reads it before git pull can rewrite
 rem this file, and exit /b keeps it from reading on into the new version.

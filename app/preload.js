@@ -30,4 +30,10 @@ contextBridge.exposeInMainWorld('gvision', {
   useVisionModel: (id) => ipcRenderer.invoke('gvision:use-vision-model', id),
   cancelVisionDownload: () => ipcRenderer.invoke('gvision:cancel-vision-download'),
   onVisionDownload: (cb) => ipcRenderer.on('gvision:vision-download', (_e, p) => cb(p)),
+  onSettingsChanged: (cb) => ipcRenderer.on('gvision:settings-changed', (_e, values) => cb(values)),
+  onError: (cb) => ipcRenderer.on('gvision:error', (_e, text) => cb(text)),
+  getNetwork: () => ipcRenderer.invoke('gvision:network'),
+  onNetwork: (cb) => ipcRenderer.on('gvision:network', (_e, state) => cb(state)),
+  testConnection: (host) => ipcRenderer.invoke('gvision:test-connection', host),
+  relaunch: () => ipcRenderer.invoke('gvision:relaunch'),
 });

@@ -274,6 +274,28 @@ input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; width: 18p
 .hotkey { min-width: 180px; height: 34px; padding: 0 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong); background: var(--surface-2); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
 .hotkey.recording { border-color: var(--user); color: var(--user); box-shadow: 0 0 0 3px #3de0ff22; }
 
+/* Two-PC mode: Home's network card and Settings' text field */
+.network-card { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 12px; }
+.net-rows { display: flex; flex-direction: column; gap: 10px; }
+.net-row { display: grid; grid-template-columns: 10px 160px 1fr; gap: 12px; align-items: baseline; }
+.net-row .status-dot { align-self: center; }
+.net-name { color: var(--muted); }
+.net-value { min-width: 0; overflow-wrap: anywhere; }
+.net-value code, .field-help code { font: 600 13px 'Cascadia Mono', Consolas, ui-monospace, monospace; color: var(--text); background: var(--surface-3); padding: 1px 6px; border-radius: 5px; }
+.net-note { font-size: 12px; color: var(--muted); }
+.net-warn { padding: 10px 12px; border-radius: var(--radius-sm); background: #ffc83d14; border: 1px solid #ffc83d40; }
+.net-bad { color: #ffb3b3; }
+.text-input { height: 34px; width: 220px; padding: 0 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font: inherit; outline: 0; }
+.text-input:focus { border-color: var(--system); }
+.host-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.test-result { font-size: 12px; color: var(--muted); max-width: 320px; text-align: right; }
+.test-result.ok { color: var(--ok); }
+.test-result.bad { color: #ffb3b3; }
+.field-tag { margin-left: 8px; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 99px; background: #3de0ff14; border: 1px solid #3de0ff33; color: var(--user); vertical-align: 1px; }
+.group-note { padding: 0 18px 8px; font-size: 12px; color: var(--muted); }
+.group-note.bad { color: #ffb3b3; }
+.field.hidden-field { display: none; }
+
 .banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 18px; margin-bottom: 16px; max-width: 760px; border-radius: var(--radius); background: #ffc83d14; border: 1px solid #ffc83d40; }
 .banner span { color: var(--muted); }
 .banner-bad { background: #ff5d5d14; border-color: #ff5d5d40; color: #ffb3b3; }
