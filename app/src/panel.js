@@ -1105,8 +1105,70 @@ window.gvision.getVisionModels().then((m) => {
 window.gvision.onVisionDownload((p) => {
   if (visionBusy) visionProgress(p);
 });
+// --- First launch: what is this PC? ---------------------------------------------
+
+function openFirstRun() {
+  $('#first-run').hidden = false;
+}
+
+async function chooseRole(role) {
+  for (const b of document.querySelectorAll('.role-card')) b.classList.toggle('selected', b.dataset.role === role);
+  if (role === 'gaming') {
+    $('#first-run-host').hidden = false;
+    $('#first-run-address').focus();
+    return;
+  }
+  $('#first-run-host').hidden = true;
+  const r = await window.gvision.saveSettings({ role });
+  if (!r.ok) return toast(r.error, true);
+  settings.values = r.values;
+  settings.roleChosen = true;
+  // Standalone is what is running already; an AI server needs a restart.
+  if (role === settings.role) {
+    $('#first-run').hidden = true;
+    renderSettings();
+    return undefined;
+  }
+  toast('Restarting G-VISION as the AI server…');
+  setTimeout(() => window.gvision.relaunch(), 600);
+  return undefined;
+}
+
+async function testFirstRun() {
+  const result = $('#first-run-result');
+  result.className = 'test-result first-run-result';
+  result.textContent = 'Testing…';
+  const r = await window.gvision.testConnection($('#first-run-address').value);
+  if (!r.ok) {
+    result.className = 'test-result first-run-result bad';
+    result.textContent = r.error;
+    return false;
+  }
+  result.className = 'test-result first-run-result ok';
+  result.textContent = `Reached the AI server in ${r.ms} ms.${r.backend ? ' Its models are running.' : ' Its backend is still starting.'}`
+    + (r.sameVersion ? '' : ` It runs another version (${r.build}): press Update and restart on both PCs.`);
+  return true;
+}
+
+for (const b of document.querySelectorAll('.role-card')) b.addEventListener('click', () => chooseRole(b.dataset.role));
+$('#first-run-test').addEventListener('click', testFirstRun);
+$('#first-run-host').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  // Connect even if the AI server isn't up yet: the gaming PC keeps retrying.
+  await testFirstRun();
+  const r = await window.gvision.saveSettings({ serverHost: $('#first-run-address').value, role: 'gaming' });
+  if (!r.ok) {
+    $('#first-run-result').className = 'test-result first-run-result bad';
+    $('#first-run-result').textContent = r.error;
+    return;
+  }
+  toast('Restarting G-VISION as the gaming PC…');
+  setTimeout(() => window.gvision.relaunch(), 900);
+});
+
 window.gvision.getSettings().then((s) => {
   settings = s;
+  if (!s.roleChosen) openFirstRun();
   renderSettings();
   renderIdleHint();
   renderLog();

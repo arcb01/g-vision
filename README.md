@@ -155,6 +155,10 @@ With a second PC on the same network, the models can run there so they don't
 share the GPU (or its VRAM) with the game. Install G-VISION on both PCs as
 above; the gaming PC doesn't need the llama.cpp folder.
 
+The first time G-VISION opens it asks **What is this PC?** (Standalone, Gaming
+PC or AI server); for a gaming PC it asks for the AI server's address there
+and then. The steps below do the same from Settings later.
+
 1. On the PC that runs the models: **Settings > Network > This PC is: AI
    server**. G-VISION restarts without the overlay, and its **Home** tab shows
    the address to type on the other PC. Windows Firewall asks to allow

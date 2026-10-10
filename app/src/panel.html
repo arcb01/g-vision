@@ -191,6 +191,41 @@
       </div>
     </div>
 
+    <div id="first-run" class="modal" hidden>
+      <div class="modal-card first-run-card" role="dialog" aria-modal="true" aria-labelledby="first-run-title">
+        <header class="modal-head">
+          <div>
+            <h2 id="first-run-title" class="modal-title">What is this PC?</h2>
+            <p class="sub">G-VISION can run on one PC, or split across two so the models don't share the GPU with the game. You can change it later in Settings &gt; Network.</p>
+          </div>
+        </header>
+        <div class="role-cards">
+          <button class="role-card" data-role="standalone">
+            <span class="role-name">Standalone</span>
+            <span class="role-sub">I play and run the models on this PC.</span>
+          </button>
+          <button class="role-card" data-role="gaming">
+            <span class="role-name">Gaming PC</span>
+            <span class="role-sub">I play here. Another PC on my network runs the models.</span>
+          </button>
+          <button class="role-card" data-role="server">
+            <span class="role-name">AI server</span>
+            <span class="role-sub">This PC runs the models for a gaming PC. No overlay here.</span>
+          </button>
+        </div>
+        <form id="first-run-host" class="first-run-host" hidden>
+          <div class="field-label">AI server address</div>
+          <div class="field-help">Start G-VISION on the other PC as an AI server first: its Home page shows the address.</div>
+          <div class="custom-row">
+            <input id="first-run-address" class="text" placeholder="192.168.1.20" spellcheck="false" required />
+            <button id="first-run-test" class="btn" type="button">Test connection</button>
+            <button class="btn btn-primary" type="submit">Connect</button>
+          </div>
+          <div id="first-run-result" class="test-result first-run-result"></div>
+        </form>
+      </div>
+    </div>
+
     <div id="toast" class="toast" hidden></div>
 
     <script src="panel.js"></script>

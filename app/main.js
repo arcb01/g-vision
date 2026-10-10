@@ -500,7 +500,14 @@ async function getSettings() {
       }
     }
   }
-  return { spec: SPEC, values, file: CONFIG_FILE, error, role: ROLE, forced: Boolean(ROLE_ARG), serverSettings };
+  // First launch: nobody has said yet what this PC is (the panel asks).
+  let roleChosen = Boolean(ROLE_ARG) || MODE === 'demo';
+  try {
+    roleChosen = roleChosen || 'role' in (readFile(CONFIG_FILE).settings || {});
+  } catch {
+    roleChosen = true; // a broken file has bigger problems; don't stack a dialog on them
+  }
+  return { spec: SPEC, values, file: CONFIG_FILE, error, role: ROLE, forced: Boolean(ROLE_ARG), serverSettings, roleChosen };
 }
 
 // Live settings reach the backend now, the rest on its next restart.
