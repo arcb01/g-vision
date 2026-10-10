@@ -104,7 +104,11 @@ first run into `python/models/` and the current folder; neither is committed.
 ## Start everything with one click (Windows)
 
 Double-click `G-VISION.bat` in the repository folder (right-click it and pick
-*Send to > Desktop (create shortcut)* to get a desktop icon). It first pulls
+*Send to > Desktop (create shortcut)* to get a desktop icon). On a fresh PC it
+needs nothing installed by hand: it installs Node.js and Python 3.12 with
+winget when they are missing, creates `python/.venv` with the CUDA build of
+PyTorch, and downloads Electron. Clone the repository with git rather than
+downloading a ZIP, or it cannot update itself. It then pulls
 the latest version with `git pull --ff-only` and reinstalls the app's npm
 packages or the Python package (`pip install -e ".[dev,perception,voice]"`)
 only when `app/package-lock.json` or `python/pyproject.toml` changed; if you
