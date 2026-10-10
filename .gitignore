@@ -23,6 +23,9 @@ Thumbs.db
 *.pt
 mobileclip*.ts
 
+# Portable Node.js the launcher downloads when none is installed
+runtime/
+
 # Local launcher settings and process logs
 gvision.config.json
 logs/
