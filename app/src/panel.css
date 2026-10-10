@@ -309,7 +309,7 @@ input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; width: 18p
 button.link { background: none; border: 0; padding: 0; color: var(--user); font: inherit; cursor: pointer; }
 
 /* --- Sessions ---------------------------------------------------------------- */
-.page.page-wide { max-width: 1280px; }
+.page.page-wide { max-width: none; }
 .nav-live {
   margin-left: auto; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
   padding: 1px 7px; border-radius: 99px; color: #062a1b; background: var(--ok);
@@ -318,14 +318,14 @@ button.link { background: none; border: 0; padding: 0; color: var(--user); font:
   margin-left: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; vertical-align: 2px;
   padding: 1px 7px; border-radius: 99px; color: var(--ok); background: #3ddc971f; border: 1px solid #3ddc9744;
 }
-.sessions-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; align-items: start; }
-.session-list { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; }
+.session-view .empty > div { max-width: 520px; line-height: 1.55; }
+.empty .btn svg { width: 16px; height: 16px; color: inherit; stroke-width: 2; }
 .session-item {
   display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px; border-radius: 11px; border: 1px solid transparent;
   background: transparent; cursor: pointer; text-align: left;
 }
 .session-item:hover { background: var(--surface-2); }
-.session-item.open { background: var(--surface); border-color: var(--border); box-shadow: var(--shadow); }
+.session-item.open { background: var(--surface-3); border-color: var(--border-strong); }
 .session-item-body { min-width: 0; }
 .session-item-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .session-item-sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
@@ -335,32 +335,73 @@ button.link { background: none; border: 0; padding: 0; color: var(--user); font:
   background: linear-gradient(135deg, hsl(var(--hue) 45% 26%), hsl(var(--hue) 40% 16%));
   border: 1px solid hsl(var(--hue) 40% 32%);
 }
-.avatar-lg { width: 48px; height: 48px; border-radius: 13px; font-size: 16px; }
+.avatar-xl { width: 72px; height: 72px; border-radius: 20px; font-size: 26px; box-shadow: 0 0 50px -10px hsl(var(--hue) 70% 45%); }
 
 .session-view { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
-.session-head { display: flex; align-items: center; gap: 14px; }
-.session-head-body { flex: 1; min-width: 0; }
-.session-title { font-size: 18px; font-weight: 650; }
-.session-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
-.wiki-bar {
-  --c: var(--muted); display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 11px;
-  background: var(--surface); border: 1px solid var(--border); color: var(--muted); font-size: 13px;
+/* The bar above the chat: session switcher, wiki status, end */
+.session-bar { display: flex; align-items: center; gap: 12px; }
+.switcher { position: relative; min-width: 0; }
+.switcher-button {
+  display: flex; align-items: center; gap: 12px; padding: 6px 12px 6px 6px; border-radius: 12px; cursor: pointer; text-align: left;
+  background: var(--surface); border: 1px solid var(--border); max-width: 420px; transition: border-color 0.15s, background 0.15s;
 }
-.wiki-bar > svg { color: var(--c); }
-.wiki-bar.ok { --c: var(--ok); }
-.wiki-bar.busy { --c: var(--user); }
-.wiki-bar.stale { --c: var(--warn); border-color: #ffc83d40; }
-.wiki-bar.bad { --c: var(--bad); border-color: #ff5d5d40; color: #ffb3b3; }
-.wiki-text { flex: 1; min-width: 0; }
-.wiki-bar .bar { height: 4px; margin-top: 7px; border-radius: 3px; background: var(--border); overflow: hidden; }
-.wiki-bar .bar-fill { height: 100%; background: var(--user); transition: width 0.4s; }
+.switcher-button:hover, .switcher-button[aria-expanded='true'] { border-color: var(--border-strong); background: var(--surface-2); }
+.switcher-body { min-width: 0; }
+.switcher-name { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.switcher-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.switcher-button > svg { color: var(--muted); margin-left: 4px; }
+.switcher-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; width: 340px; max-height: 60vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--border-strong); box-shadow: 0 20px 50px -10px #000; animation: rise 0.12s ease-out;
+}
+.wiki-status {
+  --c: var(--muted); flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+  font-size: 12px; color: var(--muted);
+}
+.wiki-status > svg { color: var(--c); }
+.wiki-status.ok { --c: var(--ok); }
+.wiki-status.busy { --c: var(--user); }
+.wiki-status.stale { --c: var(--warn); color: #ffdf8a; }
+.wiki-status.bad { --c: var(--bad); color: #ffb3b3; }
+.wiki-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wiki-status .bar { width: 160px; height: 3px; margin-top: 5px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.wiki-status .bar-fill { height: 100%; background: var(--user); transition: width 0.4s; }
+.icon-btn {
+  width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border-radius: 8px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+}
+.icon-btn:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); }
+.icon-btn:disabled { opacity: 0.4; cursor: default; }
+.icon-btn svg { width: 14px; height: 14px; }
+
+/* First download of a game's wiki: the page is its progress */
+.download {
+  margin: 10vh auto 0; width: min(520px, 100%); display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px;
+  padding: 40px 36px 32px; border-radius: 22px; background: radial-gradient(120% 120% at 50% 0%, #1b2030, var(--surface) 60%);
+  border: 1px solid var(--border); box-shadow: var(--shadow);
+}
+.download-title { font-size: 19px; font-weight: 650; margin-top: 6px; }
+.download-bar { width: 100%; height: 8px; border-radius: 99px; background: var(--surface-3); overflow: hidden; position: relative; }
+.download-bar .bar-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--user), #8af0ff); transition: width 0.5s; }
+.download-bar.indeterminate .bar-fill { position: absolute; width: 35%; animation: slide 1.4s ease-in-out infinite; }
+@keyframes slide { from { left: -35%; } to { left: 100%; } }
+.download-detail { width: 100%; display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.download-detail:not(:has(.download-pct)) { justify-content: center; }
+.download-pct { color: var(--text); font-weight: 600; }
+.download-note { font-size: 12px; color: var(--faint); max-width: 380px; line-height: 1.5; }
+.download-actions { display: flex; gap: 8px; margin-top: 4px; }
+.download-actions:empty, .download-note:empty { display: none; }
+.switcher-inline .switcher-menu { left: 50%; transform: translateX(-50%); text-align: left; }
+.download.bad .download-detail { color: #ffb3b3; justify-content: center; }
+
 
 .chat { display: flex; flex-direction: column; gap: 6px; padding: 18px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); min-height: 220px; }
 .chat .day { margin: 10px 0 4px; }
 .chat .day:first-child { margin-top: 0; }
 .chat-hint { margin: auto; max-width: 460px; text-align: center; color: var(--muted); line-height: 1.6; }
-.msg { display: flex; flex-direction: column; gap: 4px; max-width: min(640px, 80%); margin-top: 6px; }
+.msg { display: flex; flex-direction: column; gap: 4px; max-width: min(820px, 75%); margin-top: 6px; }
 .msg.me { align-self: flex-end; align-items: flex-end; }
 .msg.bot { align-self: flex-start; }
 .msg.fresh { animation: arrive 0.6s ease-out; }
@@ -408,6 +449,6 @@ button.link { background: none; border: 0; padding: 0; color: var(--user); font:
 .text:focus { border-color: var(--system); }
 
 @media (max-width: 1000px) {
-  .sessions-layout { grid-template-columns: 1fr; }
-  .session-list { position: static; }
+  .session-bar { flex-wrap: wrap; }
+  .wiki-status { order: 3; flex-basis: 100%; justify-content: flex-start; }
 }

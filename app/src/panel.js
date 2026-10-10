@@ -107,7 +107,7 @@ let isConnected = false;
 
 function setConnection({ connected }) {
   isConnected = connected;
-  renderWikiBar();
+  renderWikiStatus();
   $('#conn').classList.toggle('ok', connected);
   $('.conn-text').textContent = connected ? 'Connected to the backend' : 'Waiting for the backend';
 }
@@ -366,50 +366,121 @@ async function refreshSessions(selectId = null) {
     openId = sessionState.activeId || (sessionState.sessions[0] ? sessionState.sessions[0].id : null);
   }
   $('#session-live').hidden = !sessionState.activeId;
-  renderSessionList();
   openSession = openId ? await window.gvision.getSession(openId) : null;
   renderSessionView();
 }
 
-function renderSessionList() {
-  const box = $('#session-list');
-  if (!sessionState.sessions.length) {
-    box.replaceChildren(el('div', { class: 'empty-note', text: 'Your sessions will be listed here.' }));
-    return;
-  }
-  box.replaceChildren(...sessionState.sessions.map((x) => {
-    const live = x.id === sessionState.activeId;
-    return el('button', {
-      class: `session-item${x.id === openId ? ' open' : ''}`,
-      onclick: () => refreshSessions(x.id),
-    }, avatar(x.game.name), el('div', { class: 'session-item-body' },
-      el('div', { class: 'session-item-name' }, x.game.name, live ? el('span', { class: 'live-badge', text: 'Live' }) : null),
-      el('div', { class: 'session-item-sub', text: `${dayLabel(x.startedTs)}, ${clock(x.startedTs).slice(0, 5)} · ${x.count} question${x.count === 1 ? '' : 's'}` })));
-  }));
+function sessionSub(x) {
+  return `${dayLabel(x.startedTs)}, ${clock(x.startedTs).slice(0, 5)}${x.endedTs ? ` to ${clock(x.endedTs).slice(0, 5)}` : ''}`;
 }
+
+// The session picker at the top: the open session, and every session in a menu.
+function switcher(x) {
+  const live = x.id === sessionState.activeId;
+  const menu = el('div', { class: 'switcher-menu', hidden: true, role: 'menu' },
+    ...sessionState.sessions.map((s) => el('button', {
+      class: `session-item${s.id === openId ? ' open' : ''}`, role: 'menuitem',
+      onclick: () => refreshSessions(s.id),
+    }, avatar(s.game.name), el('div', { class: 'session-item-body' },
+      el('div', { class: 'session-item-name' }, s.game.name,
+        s.id === sessionState.activeId ? el('span', { class: 'live-badge', text: 'Live' }) : null),
+      el('div', { class: 'session-item-sub', text: `${sessionSub(s)} · ${s.count} question${s.count === 1 ? '' : 's'}` })))));
+  const button = el('button', {
+    class: 'switcher-button', 'aria-haspopup': 'menu', title: 'Switch session',
+    onclick: (e) => {
+      e.stopPropagation();
+      menu.hidden = !menu.hidden;
+      button.setAttribute('aria-expanded', String(!menu.hidden));
+    },
+  }, avatar(x.game.name),
+  el('div', { class: 'switcher-body' },
+    el('div', { class: 'switcher-name' }, x.game.name, live ? el('span', { class: 'live-badge', text: 'Live' }) : null),
+    el('div', { class: 'switcher-sub', text: `${sessionSub(x)} · ${x.exchanges.length} question${x.exchanges.length === 1 ? '' : 's'}` })),
+  icon('chevron'));
+  return el('div', { class: 'switcher' }, button, menu);
+}
+// "Other sessions" on the download view: the same menu, opened from there.
+function switcherMenuButton() {
+  const wrap = el('div', { class: 'switcher switcher-inline' });
+  const menu = switcher(openSession).querySelector('.switcher-menu');
+  wrap.append(el('button', {
+    class: 'btn btn-small btn-ghost',
+    onclick: (e) => {
+      e.stopPropagation();
+      menu.hidden = !menu.hidden;
+    },
+  }, icon('game'), 'Other sessions'), menu);
+  return wrap;
+}
+document.addEventListener('click', () => {
+  for (const m of document.querySelectorAll('.switcher-menu')) m.hidden = true;
+});
 
 function indexInfo(game) {
   return sessionState.games.find((g) => g.id === game.id) || { pages: 0 };
 }
 
-// How the session game's wiki stands: downloading, catching up, ready (and how
-// fresh), or failed. Live from the backend for the active session.
-function wikiBar(session) {
+// How the session game's wiki stands, from the backend for the active session
+// and from the saved index otherwise.
+function wikiState(session) {
   const live = session.id === sessionState.activeId;
   const st = live ? sessionState.wiki : null;
   const info = indexInfo(session.game);
   const source = (st && st.source) || info.source || `${session.game.name} wiki`;
+  const first = live && !info.pages && !(st && st.updated_ts); // nothing saved before this download
+  return { live, st, info, source, first };
+}
+
+// First download of a session's wiki, before any question: the page is just its progress.
+function showsDownload(session) {
+  const { live, st, first } = wikiState(session);
+  return live && first && !session.exchanges.length && !(st && st.state === 'ready');
+}
+
+function downloadView(session) {
+  const { st, source } = wikiState(session);
+  const total = st && st.total;
+  const pages = st ? st.pages : 0;
+  let title = `Downloading the ${source}`;
+  let detail = total ? `${number(pages)} of ${number(total)} pages` : pages ? `${number(pages)} pages` : 'Finding the wiki…';
+  let bad = false;
+  if (!st) {
+    title = `Getting the ${source} ready`;
+    detail = isConnected ? 'Connecting to the wiki…' : 'Starts once the backend is connected.';
+  } else if (st.state === 'error') {
+    bad = true;
+    title = `Couldn't download the ${source}`;
+    detail = st.error;
+  }
+  const progress = total ? Math.min(1, pages / total) : null;
+  return el('div', { class: `download${bad ? ' bad' : ''}`, id: 'wiki-status' },
+    avatar(session.game.name, 'avatar avatar-xl'),
+    el('div', { class: 'download-title', text: title }),
+    el('div', { class: 'download-bar' + (progress == null && !bad ? ' indeterminate' : '') },
+      el('div', { class: 'bar-fill', style: progress != null ? `width:${progress * 100}%` : '' })),
+    el('div', { class: 'download-detail' }, detail,
+      progress != null ? el('span', { class: 'download-pct', text: `${Math.floor(progress * 100)}%` }) : null),
+    el('div', { class: 'download-note', text: bad ? '' : 'This happens once per game. You can already ask: answers use the pages saved so far.' }),
+    el('div', { class: 'download-actions' },
+      bad ? el('button', { class: 'btn btn-small', onclick: () => window.gvision.updateWiki(false) }, icon('refresh'), 'Try again') : null,
+      sessionState.sessions.length > 1 ? switcherMenuButton() : null,
+      el('button', { class: 'btn btn-small btn-ghost', onclick: endSession }, icon('stop'), 'End session')));
+}
+
+// The wiki's state in the session bar: downloading, catching up, ready (and how fresh), or failed.
+function wikiChip(session) {
+  const { live, st, info, source } = wikiState(session);
   let text;
   let cls = '';
   let progress = null;
   let canUpdate = false;
   if (st && st.state === 'indexing') {
     cls = 'busy';
-    text = `Downloading the ${source}: ${number(st.pages)}${st.total ? ` of ${number(st.total)}` : ''} pages. Questions use what's saved so far.`;
+    text = `Downloading: ${number(st.pages)}${st.total ? ` of ${number(st.total)}` : ''} pages`;
     progress = st.total ? Math.min(1, st.pages / st.total) : null;
   } else if (st && st.state === 'updating') {
     cls = 'busy';
-    text = `Catching up with edits on the ${source}…`;
+    text = 'Catching up with wiki edits…';
   } else if (st && st.state === 'ready') {
     const stale = st.updated_ts && Date.now() / 1000 - st.updated_ts > STALE_S;
     cls = stale ? 'stale' : 'ok';
@@ -417,31 +488,34 @@ function wikiBar(session) {
     canUpdate = true;
   } else if (st && st.state === 'error') {
     cls = 'bad';
-    text = `Can't reach the wiki: ${st.error}.${st.pages ? ` Still answering from the ${number(st.pages)} pages saved.` : ''}`;
+    text = `Can't reach the wiki${st.pages ? `, using the ${number(st.pages)} pages saved` : ''}`;
     canUpdate = true;
   } else if (live) {
-    text = isConnected ? `Opening the ${source}…` : 'The wiki download starts once the backend is connected.';
+    text = isConnected ? `Opening the ${source}…` : 'Wiki: waiting for the backend';
   } else if (info.pages) {
-    text = `${source} · ${number(info.pages)} pages saved · updated ${info.updatedTs ? since(info.updatedTs) : 'never'}`;
+    text = `${source} · ${number(info.pages)} pages · updated ${info.updatedTs ? since(info.updatedTs) : 'never'}`;
   } else {
     text = `${host(session.game.wiki)} · not downloaded`;
   }
-  return el('div', { class: `wiki-bar ${cls}`, id: 'wiki-bar' },
+  return el('div', { class: `wiki-status ${cls}`, id: 'wiki-status', title: st && st.error ? st.error : text },
     icon('book'),
-    el('div', { class: 'wiki-text' }, el('div', { text }),
+    el('div', { class: 'wiki-text' }, el('span', { text }),
       progress != null ? el('div', { class: 'bar' }, el('div', { class: 'bar-fill', style: `width:${progress * 100}%` })) : null),
     canUpdate ? el('button', {
-      class: 'btn btn-small btn-ghost', title: 'Download the pages edited since the last update',
+      class: 'icon-btn', title: 'Update wiki: download the pages edited since the last update', 'aria-label': 'Update wiki',
       onclick: (e) => {
         e.currentTarget.disabled = true;
         window.gvision.updateWiki(false);
       },
-    }, icon('refresh'), 'Update wiki') : null);
+    }, icon('refresh')) : null);
 }
 
-function renderWikiBar() {
-  const bar = document.getElementById('wiki-bar');
-  if (bar && openSession) bar.replaceWith(wikiBar(openSession));
+function renderWikiStatus() {
+  const box = document.getElementById('wiki-status');
+  if (!box || !openSession) return;
+  const download = showsDownload(openSession);
+  if (download !== box.classList.contains('download')) renderSessionView(); // the download finished
+  else box.replaceWith(download ? downloadView(openSession) : wikiChip(openSession));
 }
 
 function chatMessages(e, fresh = false) {
@@ -476,13 +550,15 @@ function renderSessionView() {
   }
   const x = openSession;
   const live = x.id === sessionState.activeId;
-  const head = el('div', { class: 'session-head' }, avatar(x.game.name, 'avatar avatar-lg'),
-    el('div', { class: 'session-head-body' },
-      el('div', { class: 'session-title' }, x.game.name, live ? el('span', { class: 'live-badge', text: 'Live' }) : null),
-      el('div', { class: 'session-sub', text: `${dayLabel(x.startedTs)}, ${clock(x.startedTs).slice(0, 5)}${x.endedTs ? ` to ${clock(x.endedTs).slice(0, 5)}` : ''} · ${host(x.game.wiki)}` })),
+  const download = showsDownload(x);
+  const bar = el('div', { class: 'session-bar' }, switcher(x), wikiChip(x),
     live
       ? el('button', { class: 'btn btn-small', onclick: endSession }, icon('stop'), 'End session')
       : el('button', { class: 'btn btn-small btn-ghost btn-danger', onclick: () => deleteSession(x) }, icon('trash'), 'Delete'));
+  if (download) { // nothing but the progress, in the middle
+    box.replaceChildren(downloadView(x));
+    return;
+  }
   const chat = el('div', { class: 'chat', id: 'chat' });
   if (x.exchanges.length) {
     let day = null;
@@ -496,7 +572,7 @@ function renderSessionView() {
       ...(live ? [...kbdList(settings ? settings.values.pttKey : 'alt+3'),
         ` and ask. Questions about ${x.game.name} itself, like what an item does or what a character wants, are answered from its wiki.`] : [])));
   }
-  box.replaceChildren(head, wikiBar(x), chat);
+  box.replaceChildren(bar, chat);
   if (document.querySelector('.page[data-page="sessions"]').classList.contains('active')) $('.main').scrollTop = $('.main').scrollHeight;
 }
 
@@ -576,7 +652,8 @@ window.gvision.onSessionExchange(async ({ sessionId, entry }) => {
     }
   }
   sessionState = await window.gvision.getSessions();
-  renderSessionList();
+  const sub = document.querySelector('.switcher');
+  if (sub && openSession) sub.replaceWith(switcher(openSession));
 });
 
 window.gvision.onWiki(async (status) => {
@@ -587,7 +664,7 @@ window.gvision.onWiki(async (status) => {
   if (wasBusy && status.state === 'ready') {
     sessionState.games = (await window.gvision.getSessions()).games;
   }
-  renderWikiBar();
+  renderWikiStatus();
 });
 
 // --- Settings -------------------------------------------------------------------
