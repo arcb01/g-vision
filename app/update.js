@@ -14,13 +14,16 @@ const { spawnSync } = require('node:child_process');
 const { REPO_ROOT, loadConfig } = require('./services');
 
 const IS_WIN = process.platform === 'win32';
-const DEFAULT_EXTRAS = 'dev,perception,voice';
+// CI sets these to skip the large GPU downloads.
+const DEFAULT_EXTRAS = process.env.GVISION_EXTRAS || 'dev,perception,voice';
+const USE_GPU = IS_WIN && !process.env.GVISION_NO_GPU;
 
 // Pythons to build python/.venv from on a fresh install, best first.
-// G-VISION.bat (app/prereqs.cmd) makes sure one of them is 3.11 or newer.
-const BASE_PYTHONS = IS_WIN
-  ? [['py', ['-3.12']], ['py', ['-3']], ['python', []]]
-  : [['python3', []], ['python', []]];
+// app/setup.ps1 downloads one and passes it in GVISION_BASE_PYTHON.
+const BASE_PYTHONS = [
+  ...(process.env.GVISION_BASE_PYTHON ? [[process.env.GVISION_BASE_PYTHON, []]] : []),
+  ...(IS_WIN ? [['py', ['-3.12']], ['py', ['-3']], ['python', []]] : [['python3', []], ['python', []]]),
+];
 const PYTHON_OK = 'import sys; sys.exit(sys.version_info < (3, 11))';
 const TORCH_INDEX = 'https://download.pytorch.org/whl/cu128';
 
@@ -40,7 +43,7 @@ function ensureGpuOnnxruntime(python, run, say) {
 // install), with the CUDA build of PyTorch on Windows: installed after the
 // package, pip would pull the CPU one. Returns the venv's python, or null
 // after removing a half-made venv so the next launch tries again.
-function createVenv({ repoRoot = REPO_ROOT, run = defaultRun, log = console.log, gpu = IS_WIN } = {}) {
+function createVenv({ repoRoot = REPO_ROOT, run = defaultRun, log = console.log, gpu = USE_GPU } = {}) {
   const base = BASE_PYTHONS.find(([cmd, args]) => run(cmd, [...args, '-c', PYTHON_OK], null).ok);
   if (!base) {
     log('Could not create the Python environment: no Python 3.11 or newer found.');
@@ -97,7 +100,7 @@ function defaultRun(cmd, args, cwd, { live = false } = {}) {
 // `freshPython` installs the Python package whatever the saved state says
 // (a venv createVenv just made is empty).
 function runUpdate({
-  repoRoot = REPO_ROOT, run = defaultRun, log = console.log, python = null, extras = DEFAULT_EXTRAS, gpu = IS_WIN,
+  repoRoot = REPO_ROOT, run = defaultRun, log = console.log, python = null, extras = DEFAULT_EXTRAS, gpu = USE_GPU,
   freshPython = false,
 } = {}) {
   const result = { pulled: false, updated: false, installed: [], messages: [] };
