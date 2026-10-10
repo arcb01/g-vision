@@ -95,11 +95,11 @@ test('the vision-only toggle becomes --vision-only only when on', () => {
 test('vision reasoning lets only the vision server think and tells the backend', async () => {
   const dir = tmp();
   await download('qwen3.5-4b-ud-q8kxl', dir, { fetchFn: fakeFetch([]) });
-  const settings = { visionModel: 'qwen3.5-4b-ud-q8kxl' };
+  const settings = { visionModel: 'qwen3.5-4b-ud-q8kxl', visionReasoning: false };
   const off = serviceCommands(resolveConfig({ fileConfig: { llama: { dir }, settings } }));
   assert.ok(off.vision.args.join(' ').includes('--reasoning off'));
   assert.ok(!off.backend.args.includes('--vision-reasoning'));
-  const on = serviceCommands(resolveConfig({ fileConfig: { llama: { dir }, settings: { ...settings, visionReasoning: true } } }));
+  const on = serviceCommands(resolveConfig({ fileConfig: { llama: { dir }, settings: { visionModel: settings.visionModel } } }));  // on by default
   assert.ok(!on.vision.args.join(' ').includes('--reasoning off'));
   assert.ok(on.qwen.args.join(' ').includes('--reasoning off'));
   assert.ok(on.backend.args.includes('--vision-reasoning'));

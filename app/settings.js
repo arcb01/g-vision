@@ -54,9 +54,9 @@ const SPEC = [
     help: 'How sharp the screen is when the vision model answers a question about right now. Sharper reads small icons and numbers better but takes longer.',
   },
   {
-    key: 'visionReasoning', group: 'Vision', label: 'Reasoning', type: 'toggle', default: false,
+    key: 'visionReasoning', group: 'Vision', label: 'Reasoning', type: 'toggle', default: true,
     onFlag: '--vision-reasoning',
-    help: 'The vision model thinks before it answers. Can help with counting and telling items apart, but answers take several seconds longer. Needs a vision model other than "Same as the main Qwen".',
+    help: 'The vision model thinks briefly before it answers. It reads small details better (counts, button prompts, icons, HUD numbers) but answers take about 2 seconds longer. Needs a vision model other than "Same as the main Qwen".',
   },
   {
     key: 'visionOnly', group: 'Vision', label: 'Vision only (testing)', type: 'toggle', default: false,
