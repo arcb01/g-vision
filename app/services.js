@@ -14,6 +14,8 @@ const { modelPaths } = require('./models');
 const { resolveSettings, settingsArgs } = require('./settings');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
+// Each session game's wiki index; the panel reads <game>.json here for the picker.
+const WIKI_DIR = path.join(REPO_ROOT, 'data', 'wiki');
 const CONFIG_FILE = path.join(REPO_ROOT, 'gvision.config.json');
 const IS_WIN = process.platform === 'win32';
 
@@ -146,6 +148,7 @@ function visionCommand(vision) {
 function pythonCommand(py, llamaPort, settings = null, visionPort = null, visionModel = null) {
   const args = ['-m', 'gvision', ...py.args];
   if (settings && py.args.includes('--agent')) args.push(...settingsArgs(settings, py.args));
+  if (py.args.includes('--agent') && !py.args.includes('--wiki-dir')) args.push('--wiki-dir', WIKI_DIR);
   args.push('--port', String(py.port));
   if (py.args.includes('--agent') && !py.args.includes('--qwen-url')) {
     args.push('--qwen-url', `http://127.0.0.1:${llamaPort}`);
@@ -458,6 +461,7 @@ module.exports = {
   DEFAULTS,
   MODES,
   REPO_ROOT,
+  WIKI_DIR,
   Service,
   createServices,
   llamaCommand,

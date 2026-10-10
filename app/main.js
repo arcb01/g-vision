@@ -1,8 +1,9 @@
 // Electron main process: starts llama-server and the Python backend (see
 // services.js), owns the WebSocket connection to the Python bridge and
 // forwards validated messages to the overlay and control panel windows.
-// Answered questions are kept in the conversation log (conversation.js) and
-// the panel's Settings tab edits gvision.config.json (settings.js).
+// Answered questions are kept in the conversation log (conversation.js), and
+// in the active game session too (sessions.js), whose game's wiki the backend
+// answers from. The panel's Settings tab edits gvision.config.json (settings.js).
 //
 //   npm start                    Qwen + live perception + voice agent
 //   npm start -- --demo          synthetic demo, no Qwen
@@ -15,9 +16,11 @@ const { spawn } = require('node:child_process');
 const { relaunchCommand } = require('./update');
 const { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, screen, shell } = require('electron');
 const { parseMessage, validateMessage, makeMessage } = require('./protocol');
-const { CONFIG_FILE, REPO_ROOT, createServices, loadConfig, serviceCommands, visionService } = require('./services');
+const { CONFIG_FILE, REPO_ROOT, WIKI_DIR, createServices, loadConfig, serviceCommands, visionService } = require('./services');
 const models = require('./models');
 const { ConversationLog } = require('./conversation');
+const { SessionStore, gameList } = require('./sessions');
+const GAMES = require('./games.json');
 const { SPEC, readFile, resolveSettings, saveSettings } = require('./settings');
 
 const argv = process.argv.slice(1);
@@ -25,6 +28,8 @@ const MODE = argv.includes('--demo') ? 'demo' : null;
 const MANAGE_SERVICES = !argv.includes('--no-services') && !process.env.GVISION_NO_SERVICES;
 const LOG_DIR = path.join(REPO_ROOT, 'logs');
 const conversation = new ConversationLog(path.join(LOG_DIR, 'conversation'));
+const sessions = new SessionStore(path.join(LOG_DIR, 'sessions'));
+let wikiStatus = null; // the backend's last word on the session game's wiki index
 
 let config = null;
 let configError = null;
@@ -82,6 +87,7 @@ function connectBridge() {
     broadcast('gvision:connection', { connected, url: BRIDGE_URL });
     // The backend starts with its default dim strength; send the saved one.
     sendToBridge(makeMessage('config_changed', { changes: { 'visual_effects.dim_strength': currentSettings().dimStrength } }));
+    sendSession();
   });
   socket.addEventListener('message', (event) => {
     const result = parseMessage(String(event.data));
@@ -92,6 +98,15 @@ function connectBridge() {
       } catch (err) {
         console.error('[conversation]', err);
       }
+      try {
+        const added = sessions.add(result.msg);
+        if (added) toPanel('gvision:session-exchange', added);
+      } catch (err) {
+        console.error('[sessions]', err);
+      }
+    } else if (result.ok && result.msg.type === 'wiki_status') {
+      wikiStatus = result.msg;
+      toPanel('gvision:wiki', wikiStatus);
     } else if (result.ok) {
       broadcast('gvision:message', result.msg);
     } else {
@@ -106,6 +121,22 @@ function connectBridge() {
   socket.addEventListener('error', () => {
     // 'close' follows and schedules the reconnect.
   });
+}
+
+// The backend answers with the active session's game wiki; tell it which.
+function sendSession() {
+  const active = sessions.active();
+  sendToBridge(makeMessage('session', { session_id: active ? active.id : null, game: active ? active.game : null }));
+}
+
+function sessionsState() {
+  const active = sessions.active();
+  return {
+    sessions: sessions.list(),
+    activeId: active ? active.id : null,
+    games: gameList(GAMES, WIKI_DIR),
+    wiki: wikiStatus && active && wikiStatus.game_id === active.game.id ? wikiStatus : null,
+  };
 }
 
 function createOverlay() {
@@ -287,6 +318,31 @@ app.whenReady().then(() => {
   ipcMain.handle('gvision:update', () => updateAndRestart());
   ipcMain.handle('gvision:get-log', () => conversation.list());
   ipcMain.handle('gvision:clear-log', () => conversation.clear());
+  ipcMain.handle('gvision:sessions', () => sessionsState());
+  ipcMain.handle('gvision:session', (_event, id) => sessions.get(id));
+  ipcMain.handle('gvision:start-session', (_event, game) => {
+    try {
+      const session = sessions.start(game);
+      wikiStatus = null;
+      sendSession();
+      return { ok: true, session, state: sessionsState() };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  ipcMain.handle('gvision:end-session', () => {
+    sessions.end();
+    wikiStatus = null;
+    sendSession();
+    return sessionsState();
+  });
+  ipcMain.handle('gvision:delete-session', (_event, id) => {
+    const active = sessions.active();
+    sessions.remove(id);
+    if (active && active.id === id) sendSession();
+    return sessionsState();
+  });
+  ipcMain.handle('gvision:update-wiki', (_event, full) => sendToBridge(makeMessage('wiki_update', { full: Boolean(full) })));
   ipcMain.handle('gvision:get-settings', () => {
     let error = null;
     try {

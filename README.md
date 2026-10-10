@@ -32,6 +32,12 @@ python/            Perception, agent and audio processes (package: gvision)
       narrator.py  Qwen's running notes on the situation, every ~25 s
       look.py      The look tool: Qwen looks at recent frames ("what just hit me?")
       shared.py    Narrator and player share llama-server, the player first
+    knowledge/
+      wiki.py      MediaWiki API client: every article in bulk, recent edits, one section rendered
+      text.py      Wikitext and HTML to plain text, split into sections
+      index.py     One game's wiki in SQLite full-text search (data/wiki/<game>.sqlite)
+      library.py   The session game's wiki: downloaded once, caught up in the background
+      lookup.py    The lookup tool: game questions answered from the wiki, not the screen
     assistant.py   Push-to-talk -> speech-to-text -> agent -> panel, spotlight, voice
     agent/
       qwen.py      Client for Qwen3.5-2B in llama-server (OpenAI-compatible API)
@@ -48,8 +54,10 @@ app/               Electron app: transparent overlay + control panel
   settings.js      The panel's Settings tab: saved in gvision.config.json, passed as backend flags
   models.js        Vision models for Settings > Vision: download from Hugging Face, run as a second llama-server
   conversation.js  The panel's Log tab: questions, answers and screenshots in logs/conversation/
+  sessions.js      The panel's Sessions tab: one per game played, in logs/sessions/
+  games.json       Games offered when a session starts, with their wikis
   src/overlay.*    PixiJS overlay: outlines, semantic colors, spotlight dimming
-  src/panel.*      Control panel: Home, Log and Settings tabs
+  src/panel.*      Control panel: Home, Sessions, Log and Settings tabs
 G-VISION.bat       Double-click launcher (Windows)
 gvision.config.example.json  Launcher paths; copy to gvision.config.json
 schema/
@@ -224,6 +232,28 @@ skip that check: given only the action tools, the 2B called `set_watch` for
 `read_text` or `query_state` first: in 287 logged questions, 84% ended in
 look anyway, and half of those had first taken a detour that found nothing.
 `--route-first` brings back the old path, for comparing the two.
+
+### Sessions: questions about the game itself
+
+The screen can't answer "what does the mason villager want". Start a session
+in the panel's Sessions tab and pick the game you are playing (or name any
+other game and its wiki: Fandom, wiki.gg and most game wikis run MediaWiki).
+The backend then downloads that wiki once into `data/wiki/<game>.sqlite`,
+about 50 articles a request, and keeps it.
+
+During a session, a question that doesn't point at the screen (no "this",
+"that", "on screen", "left"...) goes to `lookup` first: SQLite full-text
+search finds the sections whose page or heading names what was asked
+("Trading > Mason"), the section is fetched rendered from the wiki once when
+online (cleaner tables than the bulk copy, then kept), and the vision model
+answers from that text alone, without an image. When the wiki names nothing
+in the question, look answers as before.
+
+The wiki bar above the session's chat says how fresh the copy is. It catches
+up with the wiki's edits when a session starts and the copy is more than a
+week old, or when you press Update wiki; a copy older than about 25 days (the
+wiki's list of edits doesn't go further back) is downloaded again in full.
+Each session keeps its own conversation in `logs/sessions/`, like the Log.
 
 ### Ask about text on screen
 

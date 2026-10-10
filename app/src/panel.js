@@ -1,5 +1,6 @@
-// Control panel: Home (what is happening now, services, performance), Log
-// (every question with the screen at that moment and the answer) and
+// Control panel: Home (what is happening now, services, performance),
+// Sessions (one per game played, a chat answered with that game's wiki too),
+// Log (every question with the screen at that moment and the answer) and
 // Settings (saved to gvision.config.json by the main process).
 'use strict';
 
@@ -17,9 +18,10 @@ const TOOL_NAMES = {
   read_text: 'Read text',
   recent_text: 'Recent text',
   look: 'Look back',
+  lookup: 'Wiki lookup',
 };
 const STEP_KINDS = {
-  asr: 'Speech', llm: 'Qwen', detector: 'Detector', ocr: 'OCR', vision: 'Vision', tool: 'Tool', tts: 'Voice',
+  asr: 'Speech', llm: 'Qwen', detector: 'Detector', ocr: 'OCR', vision: 'Vision', wiki: 'Wiki', tool: 'Tool', tts: 'Voice',
 };
 const VOICE_LABELS = { idle: 'Ready', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking' };
 
@@ -101,7 +103,11 @@ function kbdList(key) {
 
 // --- Connection and services ----------------------------------------------------
 
+let isConnected = false;
+
 function setConnection({ connected }) {
+  isConnected = connected;
+  renderWikiBar();
   $('#conn').classList.toggle('ok', connected);
   $('.conn-text').textContent = connected ? 'Connected to the backend' : 'Waiting for the backend';
 }
@@ -311,7 +317,10 @@ function openLightbox(entry) {
 }
 $('#lightbox').addEventListener('click', () => { $('#lightbox').hidden = true; });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') $('#lightbox').hidden = true;
+  if (e.key === 'Escape') {
+    $('#lightbox').hidden = true;
+    closePicker();
+  }
 });
 
 $('#log-search').addEventListener('input', () => renderLog());
@@ -322,6 +331,263 @@ $('#clear-log').addEventListener('click', async () => {
   log = [];
   renderLog();
   toast('Log cleared');
+});
+
+// --- Sessions -------------------------------------------------------------------
+
+const STALE_S = 7 * 86400; // the backend catches up with the wiki after this
+let sessionState = { sessions: [], activeId: null, games: [], wiki: null };
+let openId = null;
+let openSession = null; // the session shown, with its exchanges
+
+const number = (n) => Number(n || 0).toLocaleString();
+function since(ts) {
+  const days = Math.floor((Date.now() / 1000 - ts) / 86400);
+  return days >= 2 ? `${days} days ago` : days === 1 ? 'yesterday' : ago(ts);
+}
+function host(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+function avatar(name, cls = 'avatar') {
+  const letters = String(name).replace(/^the\s+/i, '').split(/[\s:'-]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('');
+  let hue = 0;
+  for (const c of String(name)) hue = (hue * 31 + c.charCodeAt(0)) % 360;
+  return el('span', { class: cls, style: `--hue:${hue}`, text: letters.toUpperCase() });
+}
+
+async function refreshSessions(selectId = null) {
+  sessionState = await window.gvision.getSessions();
+  if (selectId) openId = selectId;
+  if (!sessionState.sessions.some((x) => x.id === openId)) {
+    openId = sessionState.activeId || (sessionState.sessions[0] ? sessionState.sessions[0].id : null);
+  }
+  $('#session-live').hidden = !sessionState.activeId;
+  renderSessionList();
+  openSession = openId ? await window.gvision.getSession(openId) : null;
+  renderSessionView();
+}
+
+function renderSessionList() {
+  const box = $('#session-list');
+  if (!sessionState.sessions.length) {
+    box.replaceChildren(el('div', { class: 'empty-note', text: 'Your sessions will be listed here.' }));
+    return;
+  }
+  box.replaceChildren(...sessionState.sessions.map((x) => {
+    const live = x.id === sessionState.activeId;
+    return el('button', {
+      class: `session-item${x.id === openId ? ' open' : ''}`,
+      onclick: () => refreshSessions(x.id),
+    }, avatar(x.game.name), el('div', { class: 'session-item-body' },
+      el('div', { class: 'session-item-name' }, x.game.name, live ? el('span', { class: 'live-badge', text: 'Live' }) : null),
+      el('div', { class: 'session-item-sub', text: `${dayLabel(x.startedTs)}, ${clock(x.startedTs).slice(0, 5)} · ${x.count} question${x.count === 1 ? '' : 's'}` })));
+  }));
+}
+
+function indexInfo(game) {
+  return sessionState.games.find((g) => g.id === game.id) || { pages: 0 };
+}
+
+// How the session game's wiki stands: downloading, catching up, ready (and how
+// fresh), or failed. Live from the backend for the active session.
+function wikiBar(session) {
+  const live = session.id === sessionState.activeId;
+  const st = live ? sessionState.wiki : null;
+  const info = indexInfo(session.game);
+  const source = (st && st.source) || info.source || `${session.game.name} wiki`;
+  let text;
+  let cls = '';
+  let progress = null;
+  let canUpdate = false;
+  if (st && st.state === 'indexing') {
+    cls = 'busy';
+    text = `Downloading the ${source}: ${number(st.pages)}${st.total ? ` of ${number(st.total)}` : ''} pages. Questions use what's saved so far.`;
+    progress = st.total ? Math.min(1, st.pages / st.total) : null;
+  } else if (st && st.state === 'updating') {
+    cls = 'busy';
+    text = `Catching up with edits on the ${source}…`;
+  } else if (st && st.state === 'ready') {
+    const stale = st.updated_ts && Date.now() / 1000 - st.updated_ts > STALE_S;
+    cls = stale ? 'stale' : 'ok';
+    text = `${source} · ${number(st.pages)} pages · updated ${st.updated_ts ? since(st.updated_ts) : 'never'}`;
+    canUpdate = true;
+  } else if (st && st.state === 'error') {
+    cls = 'bad';
+    text = `Can't reach the wiki: ${st.error}.${st.pages ? ` Still answering from the ${number(st.pages)} pages saved.` : ''}`;
+    canUpdate = true;
+  } else if (live) {
+    text = isConnected ? `Opening the ${source}…` : 'The wiki download starts once the backend is connected.';
+  } else if (info.pages) {
+    text = `${source} · ${number(info.pages)} pages saved · updated ${info.updatedTs ? since(info.updatedTs) : 'never'}`;
+  } else {
+    text = `${host(session.game.wiki)} · not downloaded`;
+  }
+  return el('div', { class: `wiki-bar ${cls}`, id: 'wiki-bar' },
+    icon('book'),
+    el('div', { class: 'wiki-text' }, el('div', { text }),
+      progress != null ? el('div', { class: 'bar' }, el('div', { class: 'bar-fill', style: `width:${progress * 100}%` })) : null),
+    canUpdate ? el('button', {
+      class: 'btn btn-small btn-ghost', title: 'Download the pages edited since the last update',
+      onclick: (e) => {
+        e.currentTarget.disabled = true;
+        window.gvision.updateWiki(false);
+      },
+    }, icon('refresh'), 'Update wiki') : null);
+}
+
+function renderWikiBar() {
+  const bar = document.getElementById('wiki-bar');
+  if (bar && openSession) bar.replaceWith(wikiBar(openSession));
+}
+
+function chatMessages(e, fresh = false) {
+  const voice = e.via === 'voice';
+  const total = Object.values(e.latencyMs || {}).reduce((a, b) => a + b, 0);
+  const tools = e.tools || [];
+  return [
+    el('div', { class: `msg me${fresh ? ' fresh' : ''}` },
+      el('div', { class: 'msg-meta' },
+        el('span', { class: 'via', title: voice ? 'Spoken' : 'Typed' }, icon(voice ? 'mic' : 'keyboard')),
+        el('time', { text: clock(e.askedTs) }), el('span', { class: 'who', text: 'You' })),
+      el('div', { class: 'msg-bubble' }, el('div', { text: e.question }), e.imageUrl ? shot(e, 'msg-shot') : null)),
+    el('div', { class: `msg bot${fresh ? ' fresh' : ''}` },
+      el('div', { class: 'msg-meta' },
+        el('span', { class: 'who', text: 'G-VISION' }),
+        ...tools.map((t) => el('span', { class: `chip${t === 'lookup' ? ' wiki-chip' : ''}` }, icon(t === 'lookup' ? 'book' : 'tool'),
+          t === 'lookup' ? 'From the wiki' : TOOL_NAMES[t] || t)),
+        total ? el('span', { class: 'latency', text: seconds(total) }) : null),
+      el('div', { class: 'msg-bubble' }, e.answer),
+      stepsPanel(e)),
+  ];
+}
+
+function renderSessionView() {
+  const box = $('#session-view');
+  if (!openSession) {
+    box.replaceChildren(el('div', { class: 'empty' }, icon('game'),
+      el('strong', { text: 'No sessions yet' }),
+      el('div', { text: 'Start a session and pick the game you are playing. Its wiki is downloaded once, so G-VISION can answer questions about the game, not only about the screen.' }),
+      el('button', { class: 'btn btn-primary', onclick: openPicker }, icon('plus'), 'New session')));
+    return;
+  }
+  const x = openSession;
+  const live = x.id === sessionState.activeId;
+  const head = el('div', { class: 'session-head' }, avatar(x.game.name, 'avatar avatar-lg'),
+    el('div', { class: 'session-head-body' },
+      el('div', { class: 'session-title' }, x.game.name, live ? el('span', { class: 'live-badge', text: 'Live' }) : null),
+      el('div', { class: 'session-sub', text: `${dayLabel(x.startedTs)}, ${clock(x.startedTs).slice(0, 5)}${x.endedTs ? ` to ${clock(x.endedTs).slice(0, 5)}` : ''} · ${host(x.game.wiki)}` })),
+    live
+      ? el('button', { class: 'btn btn-small', onclick: endSession }, icon('stop'), 'End session')
+      : el('button', { class: 'btn btn-small btn-ghost btn-danger', onclick: () => deleteSession(x) }, icon('trash'), 'Delete'));
+  const chat = el('div', { class: 'chat', id: 'chat' });
+  if (x.exchanges.length) {
+    let day = null;
+    for (const e of x.exchanges) {
+      const d = dayLabel(e.askedTs);
+      if (d !== day) chat.append(el('div', { class: 'day', text: (day = d) }));
+      chat.append(...chatMessages(e));
+    }
+  } else {
+    chat.append(el('div', { class: 'chat-hint' }, live ? 'Hold ' : 'No questions in this session.',
+      ...(live ? [...kbdList(settings ? settings.values.pttKey : 'alt+3'),
+        ` and ask. Questions about ${x.game.name} itself, like what an item does or what a character wants, are answered from its wiki.`] : [])));
+  }
+  box.replaceChildren(head, wikiBar(x), chat);
+  if (document.querySelector('.page[data-page="sessions"]').classList.contains('active')) $('.main').scrollTop = $('.main').scrollHeight;
+}
+
+async function endSession() {
+  sessionState = await window.gvision.endSession();
+  await refreshSessions(openId);
+  toast('Session ended');
+}
+
+async function deleteSession(x) {
+  if (!window.confirm(`Delete the ${x.game.name} session and its ${x.exchanges.length} questions?`)) return;
+  await window.gvision.deleteSession(x.id);
+  openId = null;
+  await refreshSessions();
+  toast('Session deleted');
+}
+
+async function startSession(game) {
+  const r = await window.gvision.startSession(game);
+  if (!r.ok) {
+    toast(r.error, true);
+    return;
+  }
+  closePicker();
+  const known = indexInfo(r.session.game).pages;
+  await refreshSessions(r.session.id);
+  showTab('sessions');
+  toast(known ? `Session started: ${r.session.game.name}` : `Session started. Downloading the ${r.session.game.name} wiki in the background`);
+}
+
+// Game picker: popular games with how much of their wiki is saved, or any other MediaWiki wiki.
+function renderPicker() {
+  const q = $('#picker-search').value.trim().toLowerCase();
+  const games = sessionState.games.filter((g) => !q || g.name.toLowerCase().includes(q));
+  $('#picker-games').replaceChildren(...(games.length ? games.map((g) => el('button', {
+    class: 'game-tile', onclick: () => startSession({ id: g.id, name: g.name, wiki: g.wiki }),
+  }, avatar(g.name), el('div', { class: 'game-tile-body' },
+    el('div', { class: 'game-tile-name', text: g.name }),
+    el('div', { class: 'game-tile-sub', text: g.pages ? `Saved · ${number(g.pages)} pages${g.updatedTs ? `, ${since(g.updatedTs)}` : ''}` : host(g.wiki) })),
+  g.pages ? el('span', { class: 'saved-dot', title: 'Wiki saved on this PC' }) : null))
+    : [el('div', { class: 'empty-note', text: 'No game by that name in the list: add it below with its wiki address.' })]));
+}
+
+function openPicker() {
+  $('#picker-search').value = '';
+  renderPicker();
+  $('#picker').hidden = false;
+  $('#picker-search').focus();
+}
+
+function closePicker() {
+  $('#picker').hidden = true;
+}
+
+$('#new-session').addEventListener('click', openPicker);
+$('#picker-search').addEventListener('input', renderPicker);
+$('#picker .modal-close').addEventListener('click', closePicker);
+$('#picker').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closePicker();
+});
+$('#picker-custom').addEventListener('submit', (e) => {
+  e.preventDefault();
+  startSession({ name: $('#custom-name').value, wiki: $('#custom-wiki').value });
+});
+
+window.gvision.onSessionExchange(async ({ sessionId, entry }) => {
+  if (openSession && openSession.id === sessionId) {
+    openSession.exchanges.push(entry);
+    const chat = document.getElementById('chat');
+    if (openSession.exchanges.length === 1 || !chat) renderSessionView();
+    else {
+      if (dayLabel(entry.askedTs) !== dayLabel(openSession.exchanges[openSession.exchanges.length - 2].askedTs)) {
+        chat.append(el('div', { class: 'day', text: dayLabel(entry.askedTs) }));
+      }
+      chat.append(...chatMessages(entry, true));
+      $('.main').scrollTop = $('.main').scrollHeight;
+    }
+  }
+  sessionState = await window.gvision.getSessions();
+  renderSessionList();
+});
+
+window.gvision.onWiki(async (status) => {
+  const active = sessionState.sessions.find((x) => x.id === sessionState.activeId);
+  if (!active || status.game_id !== active.game.id) return;
+  const wasBusy = sessionState.wiki && ['indexing', 'updating'].includes(sessionState.wiki.state);
+  sessionState.wiki = status;
+  if (wasBusy && status.state === 'ready') {
+    sessionState.games = (await window.gvision.getSessions()).games;
+  }
+  renderWikiBar();
 });
 
 // --- Settings -------------------------------------------------------------------
@@ -570,6 +836,7 @@ window.gvision.getSettings().then((s) => {
   renderIdleHint();
   renderLog();
 });
+refreshSessions();
 window.gvision.getLog().then((entries) => {
   log = entries;
   renderLog();
