@@ -37,16 +37,18 @@ function Run {
   if ($LASTEXITCODE -ne 0) { throw "$($args -join ' ') failed (exit code $LASTEXITCODE)" }
 }
 
-function Get-Json($url) {
-  $headers = @{ 'User-Agent' = 'g-vision-setup' }
+# Web requests keep PowerShell's own User-Agent: nodejs.org answers 400 to
+# made-up ones. Errors name the URL so setup.log shows what failed.
+function Get-Web($url) {
+  $headers = @{}
   if ($env:GITHUB_TOKEN -and $url -like 'https://api.github.com/*') { $headers.Authorization = "Bearer $env:GITHUB_TOKEN" }
-  Invoke-RestMethod $url -Headers $headers -UseBasicParsing
+  try { Invoke-RestMethod $url -Headers $headers -UseBasicParsing } catch { throw "could not read $url ($($_.Exception.Message))" }
 }
 
 # Downloads $url to $out and checks its SHA-256.
 function Download($url, $out, $sha256) {
   Write-Host "Downloading $url"
-  Invoke-WebRequest $url -OutFile $out -UseBasicParsing -Headers @{ 'User-Agent' = 'g-vision-setup' }
+  try { Invoke-WebRequest $url -OutFile $out -UseBasicParsing } catch { throw "could not download $url ($($_.Exception.Message))" }
   $actual = (Get-FileHash $out -Algorithm SHA256).Hash
   if (-not $sha256 -or $actual -ne $sha256.Trim().ToUpper()) { throw "checksum mismatch for $url" }
 }
@@ -70,10 +72,12 @@ function Test-Node {
 }
 
 function Install-Node {
-  $lts = Get-Json 'https://nodejs.org/dist/index.json' | Where-Object { $_.lts } | Select-Object -First 1
+  # Assigned first: PowerShell 5.1 passes a JSON array down a pipe as one object.
+  $releases = Get-Web 'https://nodejs.org/dist/index.json'
+  $lts = $releases | Where-Object { $_.lts } | Select-Object -First 1
   $name = "node-$($lts.version)-win-$Arch"
   $base = "https://nodejs.org/dist/$($lts.version)"
-  $sums = [string](Invoke-RestMethod "$base/SHASUMS256.txt" -UseBasicParsing)
+  $sums = [string](Get-Web "$base/SHASUMS256.txt")
   $line = $sums -split "`n" | Where-Object { $_ -match "\s$([regex]::Escape($name)).zip$" }
   New-Item -ItemType Directory $Runtime -Force | Out-Null
   $zip = Join-Path $Runtime "$name.zip"
@@ -82,7 +86,7 @@ function Install-Node {
 }
 
 function Install-Git {
-  $rel = Get-Json 'https://api.github.com/repos/git-for-windows/git/releases/latest'
+  $rel = Get-Web 'https://api.github.com/repos/git-for-windows/git/releases/latest'
   $bits = if ($Arch -eq 'arm64') { 'arm64' } else { '64-bit' }
   $asset = $rel.assets | Where-Object { $_.name -match "^MinGit-[\d.]+-$bits\.zip$" } | Select-Object -First 1
   if (-not $asset) { throw "no MinGit download in git-for-windows $($rel.tag_name)" }
@@ -96,7 +100,7 @@ function Install-Uv {
   $name = "uv-$(if ($Arch -eq 'arm64') { 'aarch64' } else { 'x86_64' })-pc-windows-msvc.zip"
   $base = 'https://github.com/astral-sh/uv/releases/latest/download'
   New-Item -ItemType Directory $Runtime -Force | Out-Null
-  $sha = (([string](Invoke-RestMethod "$base/$name.sha256" -UseBasicParsing)).Trim() -split '\s+')[0]
+  $sha = (([string](Get-Web "$base/$name.sha256")).Trim() -split '\s+')[0]
   $zip = Join-Path $Runtime $name
   Download "$base/$name" $zip $sha
   Expand-To $zip (Join-Path $Runtime 'uv') $null
