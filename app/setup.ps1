@@ -153,8 +153,10 @@ try {
     Step 'Getting Python 3.12 into runtime\python'
     if (-not (Has uv)) { Install-Uv }
     Run uv python install 3.12
-    $env:GVISION_BASE_PYTHON = (& uv python find 3.12 | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or -not $env:GVISION_BASE_PYTHON) { throw 'uv could not find the Python it installed' }
+    # Not piped: Select-Object -First stops uv early and spoils its exit code.
+    $found = & uv python find 3.12
+    if ($LASTEXITCODE -ne 0 -or -not $found) { throw "uv could not find the Python it installed (exit code $LASTEXITCODE)" }
+    $env:GVISION_BASE_PYTHON = "$found".Trim()
   }
 
   Step 'Updating and installing dependencies'
