@@ -179,7 +179,9 @@ function addressList(n) {
 function renderNetwork() {
   const card = $('#network-card');
   const n = network;
+  // An AI server has no overlay and no sessions of its own: the gaming PC has them.
   document.querySelector('[data-tab="sessions"]').hidden = Boolean(n && n.role === 'server');
+  $('#clear').hidden = Boolean(n && n.role === 'server');
   if (!n || n.role === 'standalone') {
     card.hidden = true;
     return;
@@ -766,6 +768,9 @@ function setRestartNeeded(on) {
   const backend = services.managed && services.services.some((s) => s.name === 'backend' || s.name === 'server:backend');
   $('#restart-banner').hidden = !on;
   $('#restart-backend').hidden = !backend;
+  const remote = settings && settings.role === 'gaming';
+  $('#restart-title').textContent = remote ? 'Restart the AI server\'s backend to apply.' : 'Restart the backend to apply.';
+  $('#restart-backend').lastChild.textContent = remote ? 'Restart AI server backend' : 'Restart backend';
   $('#settings-dot').hidden = !on;
 }
 
@@ -787,6 +792,7 @@ async function save(key, value, tick) {
   const restartsItself = spec.side === 'local' || (settings.role === 'gaming' && spec.side === 'gaming');
   if (!spec.live && !restartsItself) setRestartNeeded(true);
   if (key === 'pttKey') renderIdleHint();
+  if (key === 'pttKey' && settings.role === 'gaming') toast('New key saved; restarting the screen and voice link');
   syncDependent();
 }
 
@@ -1014,13 +1020,39 @@ function shown(spec) {
   return true;
 }
 
+// Where each setting goes. Standalone and the AI server keep the usual
+// groups; a gaming PC splits them into what it keeps itself (the key it
+// holds, the overlay it draws) and what lives on the AI server.
+function groupOf(spec) {
+  if (settings.role !== 'gaming') return spec.group;
+  if (spec.side === 'gaming') return 'This PC';
+  if (spec.side === 'server') return `AI server: ${spec.group}`;
+  return spec.group;
+}
+
 // A gaming PC edits the AI server's voice and vision settings over the
-// network; each is tagged, and they lock while the server can't be reached.
+// network; they lock while the server can't be reached.
 function groupNote(specs) {
+  if (settings.role === 'gaming' && specs.some((s) => s.side === 'gaming')) {
+    return el('div', { class: 'group-note', text: 'Push-to-talk and the overlay run on this PC.' });
+  }
   if (settings.role !== 'gaming' || !specs.some((s) => s.side === 'server')) return null;
   const remote = settings.serverSettings || {};
-  if (remote.ok) return null;
-  return el('div', { class: 'group-note bad', text: `Settings tagged AI server live on that PC, which can't be reached: ${remote.error || 'not set up'}` });
+  const host = settings.values.serverHost || 'the AI server';
+  if (remote.ok) return el('div', { class: 'group-note', text: `Saved on ${host} and used there.` });
+  return el('div', { class: 'group-note bad', text: `These live on ${host}, which can't be reached: ${remote.error || 'not set up'}` });
+}
+
+// AI server: the address the gaming PC needs, shown where it is typed in.
+function addressField() {
+  const list = network ? network.addresses.map((a) => a.address) : [];
+  return el('div', { class: 'field', 'data-field': 'thisAddress' },
+    el('div', {},
+      el('div', { class: 'field-label', text: 'This PC\'s address' }),
+      el('div', { class: 'field-help', text: 'Type it on the gaming PC, under Settings > Network > AI server address.' })),
+    el('div', { class: 'net-value' }, ...(list.length
+      ? list.flatMap((a, i) => (i ? [' ', el('code', { text: a })] : [el('code', { text: a })]))
+      : [el('span', { class: 'net-bad', text: 'No network address' })])));
 }
 
 function roleDetails(spec) {
@@ -1038,8 +1070,9 @@ function renderSettings() {
   const groups = new Map();
   for (const spec of settings.spec) {
     if (!shown(spec)) continue;
-    if (!groups.has(spec.group)) groups.set(spec.group, []);
-    groups.get(spec.group).push(spec);
+    const group = groupOf(spec);
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push(spec);
   }
   const offline = settings.role === 'gaming' && !(settings.serverSettings && settings.serverSettings.ok);
   $('#settings-form').replaceChildren(...[...groups].map(([name, specs]) => el('section', { class: 'card group' },
@@ -1050,8 +1083,7 @@ function renderSettings() {
       const off = offline && spec.side === 'server';
       return el('div', { class: `field${off ? ' disabled locked' : ''}`, 'data-field': spec.key, inert: off },
         el('div', {},
-          el('div', { class: 'field-label' }, spec.label,
-            settings.role === 'gaming' && spec.side === 'server' ? el('span', { class: 'field-tag', text: 'AI server' }) : null, tick),
+          el('div', { class: 'field-label' }, spec.label, tick),
           el('div', { class: 'field-help', text: spec.help }),
           spec.key === 'role' ? roleDetails(spec) : null,
           ...(spec.key === 'visionModel' ? [
@@ -1063,7 +1095,8 @@ function renderSettings() {
                 el('button', { class: 'link', text: 'Cancel', onclick: () => window.gvision.cancelVisionDownload() }))),
           ] : [])),
         control(spec, settings.values[spec.key], tick));
-    }))));
+    }),
+    name === 'Network' && settings.role === 'server' ? addressField() : null)));
   syncDependent();
   renderVisionDetails();
 }
