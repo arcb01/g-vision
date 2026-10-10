@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { runUpdate } = require('../update');
+const { createVenv, runUpdate } = require('../update');
 
 const git = (cwd, ...args) => {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -140,6 +140,45 @@ test('after a Python install the GPU onnxruntime is put back if the CPU one repl
   assert.deepStrictEqual(seen, ['install -e .[dev,perception,voice]', 'install --force-reinstall --no-deps onnxruntime-gpu']);
   runUpdate({ repoRoot: local, run, log: quiet, python: 'python', gpu: true });
   assert.strictEqual(seen.length, 2); // nothing changed: no install, no check
+});
+
+test('a fresh venv gets the Python package even if an older install was recorded', () => {
+  const { local } = setup();
+  const { calls, run } = recorder();
+  runUpdate({ repoRoot: local, run, log: quiet, python: 'python' });
+  runUpdate({ repoRoot: local, run, log: quiet, python: 'python', freshPython: true });
+  assert.deepStrictEqual(calls, ['pip', 'pip']);
+});
+
+// Fake Pythons: `versions` maps a command to whether it is 3.11+.
+function venvRun(versions, failOn = null) {
+  const seen = [];
+  const run = (cmd, args) => {
+    if (args.includes('-c')) return { ok: Boolean(versions[cmd]), out: '' };
+    seen.push(`${path.basename(cmd)} ${args.join(' ')}`);
+    if (failOn && args.includes(failOn)) return { ok: false, out: '' };
+    if (args.includes('venv')) fs.mkdirSync(args[args.length - 1], { recursive: true });
+    return { ok: true, out: '' };
+  };
+  return { seen, run };
+}
+
+test('a fresh install gets python/.venv from the first usable Python, with CUDA torch on Windows', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gvision-venv-'));
+  const { seen, run } = venvRun({ python3: false, python: true, py: false });
+  const python = createVenv({ repoRoot: dir, run, log: quiet, gpu: true });
+  const venv = path.join(dir, 'python', '.venv');
+  assert.ok(python.startsWith(venv));
+  assert.strictEqual(seen[0], `python -m venv ${venv}`);
+  assert.ok(seen.some((s) => s.includes('install torch torchvision --index-url https://download.pytorch.org/whl/cu128')));
+});
+
+test('no usable Python, or a failed torch download, leaves no venv behind', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gvision-venv-'));
+  assert.strictEqual(createVenv({ repoRoot: dir, run: venvRun({}).run, log: quiet }), null);
+  const { run } = venvRun({ python3: true, python: true, py: true }, 'torch');
+  assert.strictEqual(createVenv({ repoRoot: dir, run, log: quiet, gpu: true }), null);
+  assert.ok(!fs.existsSync(path.join(dir, 'python', '.venv')));
 });
 
 test('the Update button relaunches through cmd /c so its window closes', () => {

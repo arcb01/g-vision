@@ -16,6 +16,14 @@ const { REPO_ROOT, loadConfig } = require('./services');
 const IS_WIN = process.platform === 'win32';
 const DEFAULT_EXTRAS = 'dev,perception,voice';
 
+// Pythons to build python/.venv from on a fresh install, best first.
+// G-VISION.bat (app/prereqs.cmd) makes sure one of them is 3.11 or newer.
+const BASE_PYTHONS = IS_WIN
+  ? [['py', ['-3.12']], ['py', ['-3']], ['python', []]]
+  : [['python3', []], ['python', []]];
+const PYTHON_OK = 'import sys; sys.exit(sys.version_info < (3, 11))';
+const TORCH_INDEX = 'https://download.pytorch.org/whl/cu128';
+
 // onnxruntime and onnxruntime-gpu install the same module, and whichever
 // pip wrote last wins. Kokoro needs the GPU build, so after an install put
 // it back on top if the CPU build replaced it.
@@ -26,6 +34,35 @@ function ensureGpuOnnxruntime(python, run, say) {
   say('Putting the GPU build of onnxruntime back on top (for the voice)...');
   const r = run(python, ['-m', 'pip', 'install', '--force-reinstall', '--no-deps', 'onnxruntime-gpu'], null, { live: true });
   if (!r.ok) say('Could not reinstall onnxruntime-gpu; the voice will run on the CPU.');
+}
+
+// Creates python/.venv when there is no Python environment yet (a fresh
+// install), with the CUDA build of PyTorch on Windows: installed after the
+// package, pip would pull the CPU one. Returns the venv's python, or null
+// after removing a half-made venv so the next launch tries again.
+function createVenv({ repoRoot = REPO_ROOT, run = defaultRun, log = console.log, gpu = IS_WIN } = {}) {
+  const base = BASE_PYTHONS.find(([cmd, args]) => run(cmd, [...args, '-c', PYTHON_OK], null).ok);
+  if (!base) {
+    log('Could not create the Python environment: no Python 3.11 or newer found.');
+    return null;
+  }
+  const venv = path.join(repoRoot, 'python', '.venv');
+  const python = path.join(venv, IS_WIN ? 'Scripts/python.exe' : 'bin/python');
+  const fail = (why) => {
+    log(`Could not create the Python environment (will retry next launch): ${why}`);
+    fs.rmSync(venv, { recursive: true, force: true });
+    return null;
+  };
+  log(`Creating the Python environment in ${venv}, first run only...`);
+  const [cmd, args] = base;
+  if (!run(cmd, [...args, '-m', 'venv', venv], null, { live: true }).ok) return fail('python -m venv failed');
+  run(python, ['-m', 'pip', 'install', '--upgrade', 'pip'], null, { live: true });
+  if (gpu) {
+    log('Installing the CUDA build of PyTorch (a few GB)...');
+    const r = run(python, ['-m', 'pip', 'install', 'torch', 'torchvision', '--index-url', TORCH_INDEX], null, { live: true });
+    if (!r.ok) return fail('could not install PyTorch, see the output above');
+  }
+  return python;
 }
 
 function fileHash(file) {
@@ -57,8 +94,11 @@ function defaultRun(cmd, args, cwd, { live = false } = {}) {
 }
 
 // Returns { pulled, updated, installed: [...], messages: [...] }.
+// `freshPython` installs the Python package whatever the saved state says
+// (a venv createVenv just made is empty).
 function runUpdate({
   repoRoot = REPO_ROOT, run = defaultRun, log = console.log, python = null, extras = DEFAULT_EXTRAS, gpu = IS_WIN,
+  freshPython = false,
 } = {}) {
   const result = { pulled: false, updated: false, installed: [], messages: [] };
   const say = (m) => {
@@ -89,6 +129,7 @@ function runUpdate({
   // Reinstall only what changed since the last successful install.
   const stateFile = path.join(repoRoot, 'logs', 'install-state.json');
   const state = readState(stateFile);
+  if (freshPython) delete state.python;
   const deps = [
     {
       key: 'npm',
@@ -141,14 +182,21 @@ function relaunchCommand(launcher, extra = '') {
 
 if (require.main === module) {
   let python = null;
+  let freshPython = false;
+  let noPython = false;
   try {
     const cfg = loadConfig();
     if (!cfg.python.notFound) python = cfg.python.exe;
+    noPython = Boolean(cfg.python.notFound);
   } catch (err) {
     console.log(`Ignoring gvision.config.json for the update: ${err.message}`);
   }
   try {
-    const r = runUpdate({ python });
+    if (noPython) {
+      python = createVenv();
+      freshPython = python !== null;
+    }
+    const r = runUpdate({ python, freshPython });
     // Exit code 2 tells the launcher to leave the window open a moment so a
     // failed install can be read.
     if (r.messages.some((m) => m.startsWith('Could not install'))) process.exitCode = 2;
@@ -157,4 +205,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { fileHash, relaunchCommand, runUpdate };
+module.exports = { createVenv, fileHash, relaunchCommand, runUpdate };
