@@ -366,6 +366,8 @@ async function refreshSessions(selectId = null) {
     openId = sessionState.activeId || (sessionState.sessions[0] ? sessionState.sessions[0].id : null);
   }
   $('#session-live').hidden = !sessionState.activeId;
+  // With no sessions there is no list: the empty state takes the whole page.
+  $('.sessions-layout').classList.toggle('none', !sessionState.sessions.length);
   renderSessionList();
   openSession = openId ? await window.gvision.getSession(openId) : null;
   renderSessionView();

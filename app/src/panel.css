@@ -319,6 +319,10 @@ button.link { background: none; border: 0; padding: 0; color: var(--user); font:
   padding: 1px 7px; border-radius: 99px; color: var(--ok); background: #3ddc971f; border: 1px solid #3ddc9744;
 }
 .sessions-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; align-items: start; }
+.sessions-layout.none { grid-template-columns: minmax(0, 1fr); }
+.sessions-layout.none .session-list { display: none; }
+.session-view .empty > div { max-width: 520px; line-height: 1.55; }
+.empty .btn svg { width: 16px; height: 16px; color: inherit; stroke-width: 2; }
 .session-list { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; }
 .session-item {
   display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px; border-radius: 11px; border: 1px solid transparent;
