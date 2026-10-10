@@ -184,3 +184,43 @@ def test_look_without_evidence_keeps_its_prompt():
     asyncio.run(LookTool(qwen, history)("what is that?", seconds=0))
     prompt = qwen.calls[0]["messages"][0]["content"][-1]["text"]
     assert "already knows" not in prompt and "Only say what you can see in the screenshots;" in prompt
+
+
+def recording_lookup(seen, said=None):
+    from gvision.knowledge.lookup import SCHEMA as LOOKUP
+
+    async def lookup(question=""):
+        seen.append(question)
+        if said is None:
+            return ToolResult({"error": "the Minecraft wiki names nothing in the question"})
+        return ToolResult({"answer": said, "wiki": "Minecraft Wiki", "pages": ["Trading > Mason"]}, speak=said)
+
+    return LOOKUP, lookup
+
+
+def test_a_game_question_goes_to_the_wiki_first():
+    world = WorldState()
+    looked, asked = [], []
+    tools = ToolExecutor(world)
+    tools.register(SCHEMA, recording_look(looked), HINT)
+    tools.register(*recording_lookup(asked, "Masons want clay balls and stone for emeralds."))
+    answer = asyncio.run(Agent(FakeQwen(), world, tools).handle("what does the mason villager want"))
+
+    assert answer.text.startswith("Masons want") and answer.tool_calls == ["lookup"]
+    assert asked == ["what does the mason villager want"] and looked == []
+    assert "Trading > Mason" in answer.steps[-1].detail
+
+
+def test_look_answers_when_the_wiki_has_nothing_or_the_question_is_about_the_screen():
+    world = WorldState()
+    looked, asked = [], []
+    tools = ToolExecutor(world)
+    tools.register(SCHEMA, recording_look(looked), HINT)
+    tools.register(*recording_lookup(asked))
+    agent = Agent(FakeQwen(), world, tools)
+    answer = asyncio.run(agent.handle("how many hearts do zombies have"))
+    assert answer.tool_calls == ["look"] and asked == ["how many hearts do zombies have"]
+    assert [s.title for s in answer.steps][:2] == ["A question: look answers",
+                                                   "Wiki lookup: nothing found, look answers"]
+    asyncio.run(agent.handle("what does this sign say"))
+    assert len(asked) == 1 and len(looked) == 2

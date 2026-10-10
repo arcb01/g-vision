@@ -151,6 +151,7 @@ STEP_TITLES: dict[str, tuple[StepKind, str]] = {
     "read_text": ("ocr", "OCR: read the screen"),
     "recent_text": ("ocr", "OCR: text seen recently"),
     "look": ("vision", "Qwen vision: look at recent frames"),
+    "lookup": ("wiki", "Wiki lookup"),
 }
 
 
@@ -230,6 +231,9 @@ class ToolExecutor:
         known = result.content.get("evidence")
         if known:
             detail += "\nSent along: " + ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in known.items())
+        pages = result.content.get("pages")
+        if pages:
+            detail += f"\nFrom the {result.content.get('wiki', 'wiki')}: " + "; ".join(pages)
         crop = result.content.get("crop")
         if crop:
             detail += f"\nSharp crop of the {crop['region']}: {crop['size']} px at full resolution"

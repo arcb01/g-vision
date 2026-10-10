@@ -24,6 +24,10 @@
       <symbol id="i-steps" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><path d="M5 8v8M10 6h10M10 18h10M10 12h7"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
       <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+      <symbol id="i-game" viewBox="0 0 24 24"><path d="M6 8h12a4 4 0 0 1 4 4v1a4 4 0 0 1-7.2 2.4L14 14h-4l-.8 1.4A4 4 0 0 1 2 13v-1a4 4 0 0 1 4-4z"/><path d="M7 11v3M5.5 12.5h3"/><circle cx="16" cy="12" r=".6"/><circle cx="18" cy="13.5" r=".6"/></symbol>
+      <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5M8 7h7"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
     </svg>
 
     <div class="app">
@@ -38,6 +42,7 @@
 
         <nav class="nav" role="tablist">
           <button class="nav-item active" data-tab="home" role="tab"><svg><use href="#i-home"/></svg>Home</button>
+          <button class="nav-item" data-tab="sessions" role="tab"><svg><use href="#i-game"/></svg>Sessions<span id="session-live" class="nav-live" hidden>Live</span></button>
           <button class="nav-item" data-tab="log" role="tab"><svg><use href="#i-log"/></svg>Log<span id="log-count" class="nav-count" hidden></span></button>
           <button class="nav-item" data-tab="settings" role="tab"><svg><use href="#i-settings"/></svg>Settings<span id="settings-dot" class="nav-dot" hidden></span></button>
         </nav>
@@ -101,6 +106,23 @@
           </details>
         </section>
 
+        <!-- Sessions -->
+        <section class="page page-wide" data-page="sessions">
+          <header class="page-head">
+            <div>
+              <h1>Sessions</h1>
+              <p class="sub">One per game you play. Answers in a session also come from that game's wiki.</p>
+            </div>
+            <div class="head-actions">
+              <button id="new-session" class="btn btn-primary"><svg><use href="#i-plus"/></svg>New session</button>
+            </div>
+          </header>
+          <div class="sessions-layout">
+            <div id="session-list" class="session-list"></div>
+            <div id="session-view" class="session-view"></div>
+          </div>
+        </section>
+
         <!-- Log -->
         <section class="page" data-page="log">
           <header class="page-head">
@@ -140,6 +162,29 @@
         <figcaption id="lightbox-cap"></figcaption>
       </figure>
       <button class="lightbox-close btn btn-ghost" aria-label="Close"><svg><use href="#i-x"/></svg></button>
+    </div>
+
+    <div id="picker" class="modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+        <header class="modal-head">
+          <div>
+            <h2 id="picker-title" class="modal-title">What are you playing?</h2>
+            <p class="sub">G-VISION downloads the game's wiki once, then answers questions about the game from it.</p>
+          </div>
+          <button class="btn btn-ghost btn-small modal-close" aria-label="Close"><svg><use href="#i-x"/></svg></button>
+        </header>
+        <label class="search picker-search"><svg><use href="#i-search"/></svg><input id="picker-search" type="search" placeholder="Search games" /></label>
+        <div id="picker-games" class="picker-games"></div>
+        <form id="picker-custom" class="picker-custom">
+          <div class="field-label">Another game</div>
+          <div class="field-help">Any wiki that runs MediaWiki works: Fandom, wiki.gg and most game wikis.</div>
+          <div class="custom-row">
+            <input id="custom-name" class="text" placeholder="Game name" required />
+            <input id="custom-wiki" class="text" placeholder="Wiki address, e.g. hades.wiki.gg" required />
+            <button class="btn" type="submit">Start</button>
+          </div>
+        </form>
+      </div>
     </div>
 
     <div id="toast" class="toast" hidden></div>

@@ -19,6 +19,7 @@ import httpx
 
 from gvision.agent.qwen import Reply
 from gvision.agent.tools import ToolExecutor, ToolResult, brief
+from gvision.knowledge.lookup import about_screen
 from gvision.protocol import Step
 from gvision.world import WorldState
 
@@ -181,9 +182,14 @@ class Agent:
         show me, stop) also asks the 2B model, at the same time."""
         args = {"question": request, "seconds": look_back(request)}
         if not asks_action(request):
+            wiki_steps: list[Step] = []
+            if self.tools.has("lookup") and not about_screen(request):
+                answer = await self._lookup(request, wiki_steps)
+                if answer:
+                    return answer
             steps = [Step(kind="llm", title="A question: look answers",
                           detail="no find, where, show or stop in it, so no action check; "
-                                 "look answers with what OCR and the tracker know")]
+                                 "look answers with what OCR and the tracker know"), *wiki_steps]
             look, ms = await self._timed_look(args)
             steps.append(self.tools.step("look", args, look, ms))
             text = look.speak or "I couldn't see that right now."
@@ -222,6 +228,23 @@ class Agent:
         latency["tools"] = ms
         text = look.speak or "I couldn't see that right now."
         return self.with_text(Answer(text, look.refs, ["look"], latency, steps=steps), [look])
+
+    async def _lookup(self, request: str, steps: list[Step]) -> Answer | None:
+        """A question about the game, not the screen: the session game's wiki answers.
+        None, with a step saying why, when the wiki names nothing in it."""
+        args = {"question": request}
+        t = time.perf_counter()
+        result = await self.tools.run("lookup", args)
+        ms = (time.perf_counter() - t) * 1000
+        steps.append(self.tools.step("lookup", args, result, ms))
+        if not result.speak:
+            steps[-1].ok = True  # not a failure: look answers instead
+            steps[-1].title += ": nothing found, look answers"
+            return None
+        return Answer(result.speak, [], ["lookup"], {"tools": ms}, steps=[
+            Step(kind="llm", title="A question about the game: the wiki answers",
+                 detail="nothing in it points at the screen, so the session game's wiki answers first"),
+            *steps])
 
     async def _timed_look(self, args: dict[str, Any]) -> tuple[ToolResult, float]:
         t = time.perf_counter()

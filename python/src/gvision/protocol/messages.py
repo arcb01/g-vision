@@ -70,7 +70,7 @@ class Segment(_Model):
     refs: list[Ref] = []
 
 
-StepKind = Literal["asr", "llm", "detector", "ocr", "vision", "tool", "tts"]
+StepKind = Literal["asr", "llm", "detector", "ocr", "vision", "wiki", "tool", "tts"]
 
 
 class Step(_Model):
@@ -83,6 +83,15 @@ class Step(_Model):
     ms: float | None = None
     ok: bool = True
     """False for an error or a fallback."""
+
+
+class Game(_Model):
+    """The game a session is about, and the wiki that knows it."""
+
+    id: Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")]
+    name: str
+    wiki: str
+    """The wiki's address: its main page or its api.php."""
 
 
 class Badge(_Model):
@@ -202,6 +211,24 @@ class ExchangeMsg(_Message):
     The overlay is excluded from capture, so this is the game alone."""
 
 
+class WikiStatusMsg(_Message):
+    """How far the session game's wiki index is, for the panel."""
+
+    type: Literal["wiki_status"] = "wiki_status"
+    game_id: str | None = None
+    state: Literal["off", "indexing", "updating", "ready", "error"]
+    """off: no session game. indexing: first download. updating: catching up on edits."""
+    pages: int = 0
+    """Pages in the local index."""
+    total: int | None = None
+    """Articles on the wiki, while indexing."""
+    updated_ts: float | None = None
+    """When the index last caught up with the wiki."""
+    source: str | None = None
+    """The wiki's name, e.g. "Minecraft Wiki"."""
+    error: str | None = None
+
+
 # --- Either direction ------------------------------------------------------
 
 
@@ -222,6 +249,23 @@ class ConfigChangedMsg(_Message):
     changes: dict[str, Any]
 
 
+class SessionMsg(_Message):
+    """The panel started or ended a session: answer with this game's wiki."""
+
+    type: Literal["session"] = "session"
+    session_id: str | None = None
+    game: Game | None = None
+    """None ends the session: no wiki."""
+
+
+class WikiUpdateMsg(_Message):
+    """Catch the session game's wiki index up with the wiki now."""
+
+    type: Literal["wiki_update"] = "wiki_update"
+    full: bool = False
+    """Download every page again instead of only the edited ones."""
+
+
 Message = Annotated[
     Union[
         ObjectsMsg,
@@ -235,8 +279,11 @@ Message = Annotated[
         StatusMsg,
         VoiceMsg,
         ExchangeMsg,
+        WikiStatusMsg,
         ClearMsg,
         ConfigChangedMsg,
+        SessionMsg,
+        WikiUpdateMsg,
     ],
     Field(discriminator="type"),
 ]

@@ -140,6 +140,7 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
         if args.narrate_every > 0:
             tools.hints.append(SITUATION_HINT)
             narrator = asyncio.create_task(Narrator(qwen, history, events, world, args.narrate_every).run(stop))
+    knowledge = await _knowledge(args, bridge, tools, qwen.looking if memory else qwen)
     if not await qwen.health():
         log.warning("no llama-server at %s yet; start it (see README) and requests will work", args.qwen_url)
     if memory and args.vision_url:
@@ -173,7 +174,29 @@ async def _agent(args: argparse.Namespace, bridge: Bridge, world, stop: asyncio.
     finally:
         if narrator:
             narrator.cancel()
+        await knowledge.close()
         await qwen.close()
+
+
+async def _knowledge(args: argparse.Namespace, bridge: Bridge, tools, qwen):
+    """The session game's wiki and the lookup tool that answers from it. The
+    panel sends the game when a session starts (and again on reconnect)."""
+    from gvision.knowledge import Knowledge
+    from gvision.knowledge.lookup import HINT, SCHEMA, LookupTool
+    from gvision.protocol import SessionMsg, WikiUpdateMsg
+
+    knowledge = Knowledge(args.wiki_dir, bridge.send)
+    tools.register(SCHEMA, LookupTool(qwen, knowledge), HINT)
+
+    async def on_message(msg: Message) -> None:
+        if isinstance(msg, SessionMsg):
+            log.info("session %s: %s", msg.session_id, msg.game.name if msg.game else "ended")
+            await knowledge.set_game(msg.game)
+        elif isinstance(msg, WikiUpdateMsg):
+            await knowledge.update(full=msg.full)
+
+    bridge.on_message(on_message)
+    return knowledge
 
 
 def _split(text: str) -> list[str]:
@@ -224,6 +247,7 @@ def main() -> None:
     agent.add_argument("--text-profiles", default="data/profiles", help="where learned text zones are saved per game")
     agent.add_argument("--ocr-side", type=int, default=1280, help="text detection resolution (long side, px)")
     agent.add_argument("--ocr-threads", type=int, default=4, help="CPU threads for RapidOCR")
+    agent.add_argument("--wiki-dir", default="data/wiki", help="where each session game's wiki index is kept")
     agent.add_argument("--no-memory", action="store_true", help="no frame history, look tool or narrator")
     agent.add_argument("--history-seconds", type=float, default=60.0, help="how much of the screen to remember")
     agent.add_argument("--narrate-every", type=float, default=25.0,

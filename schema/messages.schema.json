@@ -437,6 +437,32 @@
       "title": "FocusMsg",
       "type": "object"
     },
+    "Game": {
+      "additionalProperties": false,
+      "description": "The game a session is about, and the wiki that knows it.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "wiki": {
+          "title": "Wiki",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "wiki"
+      ],
+      "title": "Game",
+      "type": "object"
+    },
     "HighlightMsg": {
       "additionalProperties": false,
       "description": "Set an element's glow style and meaning.",
@@ -621,6 +647,60 @@
       "title": "SegmentStartedMsg",
       "type": "object"
     },
+    "SessionMsg": {
+      "additionalProperties": false,
+      "description": "The panel started or ended a session: answer with this game's wiki.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "session",
+          "default": "session",
+          "title": "Type",
+          "type": "string"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Id"
+        },
+        "game": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Game"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "session_id",
+        "game"
+      ],
+      "title": "SessionMsg",
+      "type": "object"
+    },
     "StatusMsg": {
       "additionalProperties": false,
       "description": "Dashboard metrics.",
@@ -724,6 +804,7 @@
             "detector",
             "ocr",
             "vision",
+            "wiki",
             "tool",
             "tts"
           ],
@@ -927,6 +1008,153 @@
       ],
       "title": "VoiceMsg",
       "type": "object"
+    },
+    "WikiStatusMsg": {
+      "additionalProperties": false,
+      "description": "How far the session game's wiki index is, for the panel.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "wiki_status",
+          "default": "wiki_status",
+          "title": "Type",
+          "type": "string"
+        },
+        "game_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Game Id"
+        },
+        "state": {
+          "enum": [
+            "off",
+            "indexing",
+            "updating",
+            "ready",
+            "error"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "pages": {
+          "default": 0,
+          "title": "Pages",
+          "type": "integer"
+        },
+        "total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total"
+        },
+        "updated_ts": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Updated Ts"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "game_id",
+        "state",
+        "pages",
+        "total",
+        "updated_ts",
+        "source",
+        "error"
+      ],
+      "title": "WikiStatusMsg",
+      "type": "object"
+    },
+    "WikiUpdateMsg": {
+      "additionalProperties": false,
+      "description": "Catch the session game's wiki index up with the wiki now.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "number"
+        },
+        "type": {
+          "const": "wiki_update",
+          "default": "wiki_update",
+          "title": "Type",
+          "type": "string"
+        },
+        "full": {
+          "default": false,
+          "title": "Full",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "v",
+        "ts",
+        "type",
+        "full"
+      ],
+      "title": "WikiUpdateMsg",
+      "type": "object"
     }
   },
   "discriminator": {
@@ -942,8 +1170,11 @@
       "highlight": "#/$defs/HighlightMsg",
       "objects": "#/$defs/ObjectsMsg",
       "segment_started": "#/$defs/SegmentStartedMsg",
+      "session": "#/$defs/SessionMsg",
       "status": "#/$defs/StatusMsg",
-      "voice": "#/$defs/VoiceMsg"
+      "voice": "#/$defs/VoiceMsg",
+      "wiki_status": "#/$defs/WikiStatusMsg",
+      "wiki_update": "#/$defs/WikiUpdateMsg"
     },
     "propertyName": "type"
   },
@@ -982,10 +1213,19 @@
       "$ref": "#/$defs/ExchangeMsg"
     },
     {
+      "$ref": "#/$defs/WikiStatusMsg"
+    },
+    {
       "$ref": "#/$defs/ClearMsg"
     },
     {
       "$ref": "#/$defs/ConfigChangedMsg"
+    },
+    {
+      "$ref": "#/$defs/SessionMsg"
+    },
+    {
+      "$ref": "#/$defs/WikiUpdateMsg"
     }
   ]
 }

@@ -28,6 +28,11 @@
              {"kind": "llm", "title": "Qwen chooses what to do", "detail": "called set_watch({\"targets\": [\"creeper\"]})", "ms": 412.0, "ok": true},
              {"kind": "detector", "title": "Detector: find and highlight", "detail": null, "ms": 1.5, "ok": true}],
    "screenshot": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ=="},
+  {"v": 1, "ts": 1759500005.9, "type": "wiki_status", "game_id": "minecraft", "state": "indexing", "pages": 2350,
+   "total": 8214, "updated_ts": null, "source": "Minecraft Wiki", "error": null},
   {"v": 1, "ts": 1759500006.0, "type": "clear", "reason": "dismiss hotkey"},
-  {"v": 1, "ts": 1759500007.0, "type": "config_changed", "changes": {"visual_effects.dim_strength": 0.4}}
+  {"v": 1, "ts": 1759500007.0, "type": "config_changed", "changes": {"visual_effects.dim_strength": 0.4}},
+  {"v": 1, "ts": 1759500008.0, "type": "session", "session_id": "s1759500008000",
+   "game": {"id": "minecraft", "name": "Minecraft", "wiki": "https://minecraft.wiki"}},
+  {"v": 1, "ts": 1759500009.0, "type": "wiki_update", "full": false}
 ]
