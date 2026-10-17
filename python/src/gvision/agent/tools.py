@@ -192,7 +192,9 @@ class ToolExecutor:
             self.hints.append(hint)
 
     def has(self, name: str) -> bool:
-        return name in self._extra
+        """Registered and usable now: a handler with ``ready`` (lookup, which
+        needs a session game with a wiki) says when it isn't."""
+        return name in self._extra and getattr(self._extra[name], "ready", True)
 
     async def run(self, name: str, args: dict[str, Any]) -> ToolResult:
         try:

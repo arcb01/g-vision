@@ -195,6 +195,22 @@ def test_no_game_means_no_wiki(tmp_path):
     assert k.status().state == "off"
 
 
+def test_game_without_a_wiki(tmp_path):
+    async def run():
+        sent = []
+        k = Knowledge(tmp_path, sent.append, client=lambda game: pytest.fail("no wiki to open"))
+        await k.set_game(Game(id="hades-ii", name="Hades II"))
+        assert sent[-1].state == "off" and sent[-1].game_id == "hades-ii"
+        await k.update()
+        await k.wait()
+        assert await k.search("boons") == []
+        assert not list(tmp_path.iterdir())  # nothing downloaded, no index
+        result = await LookupTool(FakeQwen(), k)("what does this boon do")
+        assert result.content == {"error": "no wiki for this session"}
+
+    asyncio.run(run())
+
+
 def fake_mediawiki():
     """httpx transport answering like a MediaWiki with three articles, two per batch."""
     import httpx

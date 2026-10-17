@@ -30,6 +30,14 @@ test('a custom game gets an id from its name and a full wiki address', () => {
   assert.throws(() => checkGame({ name: 'X', wiki: 'nope' }), /web address/);
 });
 
+test('a custom game can go without a wiki', () => {
+  assert.deepStrictEqual(checkGame({ name: 'Hades II', wiki: '  ' }), { id: 'hades-ii', name: 'Hades II', wiki: null });
+  assert.deepStrictEqual(checkGame({ name: 'Hades II' }), { id: 'hades-ii', name: 'Hades II', wiki: null });
+  const store = new SessionStore(tmp());
+  const s = store.start({ name: 'Hades II', wiki: '' }, 1000);
+  assert.strictEqual(store.get(s.id).game.wiki, null);
+});
+
 test('a session collects the exchanges asked while it is active', () => {
   const store = new SessionStore(tmp());
   assert.strictEqual(store.add(exchange('before', 1)), null);

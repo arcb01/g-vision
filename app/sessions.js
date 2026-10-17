@@ -16,12 +16,16 @@ function slug(name) {
   return String(name).toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
 }
 
-// A game from the panel: a known one, or a custom name and wiki URL.
+// A game from the panel: a known one, or a custom name with a wiki URL or
+// none (wiki null: the session answers from the screen alone).
 function checkGame(game) {
   if (!game || typeof game !== 'object') throw new Error('pick a game');
   const name = String(game.name || '').trim();
   if (!name) throw new Error('the game needs a name');
+  const id = game.id && GAME_ID.test(game.id) ? game.id : slug(name);
+  if (!GAME_ID.test(id)) throw new Error('the game name needs a letter or a number');
   let wiki = String(game.wiki || '').trim();
+  if (!wiki) return { id, name, wiki: null };
   if (!/^https?:\/\//i.test(wiki)) wiki = `https://${wiki}`;
   let url;
   try {
@@ -30,8 +34,6 @@ function checkGame(game) {
     throw new Error(`"${game.wiki}" is not a web address`);
   }
   if (!url.hostname.includes('.')) throw new Error(`"${game.wiki}" is not a web address`);
-  const id = game.id && GAME_ID.test(game.id) ? game.id : slug(name);
-  if (!GAME_ID.test(id)) throw new Error('the game name needs a letter or a number');
   return { id, name, wiki: url.href.replace(/\/$/, '') };
 }
 

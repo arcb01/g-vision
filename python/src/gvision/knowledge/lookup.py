@@ -72,7 +72,7 @@ class LookupTool:
     async def __call__(self, question: str = "") -> ToolResult:
         k = self.knowledge
         if not self.ready:
-            return ToolResult({"error": "no game session, so no wiki"})
+            return ToolResult({"error": "no wiki for this session" if k.game else "no game session, so no wiki"})
         snippets = await k.search(question)
         if not snippets:
             return ToolResult({"error": f"the {k.game.name} wiki names nothing in the question"})

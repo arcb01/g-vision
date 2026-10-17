@@ -90,8 +90,9 @@ class Game(_Model):
 
     id: Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")]
     name: str
-    wiki: str
-    """The wiki's address: its main page or its api.php."""
+    wiki: str | None = None
+    """The wiki's address: its main page or its api.php. None: no wiki, the
+    session answers from the screen alone."""
 
 
 class Badge(_Model):
