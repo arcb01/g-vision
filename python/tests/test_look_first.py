@@ -224,3 +224,16 @@ def test_look_answers_when_the_wiki_has_nothing_or_the_question_is_about_the_scr
                                                    "Wiki lookup: nothing found, look answers"]
     asyncio.run(agent.handle("what does this sign say"))
     assert len(asked) == 1 and len(looked) == 2
+
+
+def test_a_session_without_a_wiki_skips_the_lookup():
+    world = WorldState()
+    looked, asked = [], []
+    tools = ToolExecutor(world)
+    tools.register(SCHEMA, recording_look(looked), HINT)
+    schema, lookup = recording_lookup(asked, "never said")
+    lookup.ready = False  # LookupTool.ready: the session game has no wiki
+    tools.register(schema, lookup)
+    answer = asyncio.run(Agent(FakeQwen(), world, tools).handle("what does the mason villager want"))
+    assert answer.tool_calls == ["look"] and asked == [] and len(looked) == 1
+    assert "Wiki lookup" not in " ".join(s.title for s in answer.steps)

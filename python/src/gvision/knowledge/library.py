@@ -103,7 +103,7 @@ class Knowledge:
         await self._stop()
         self.game = game
         self._total = None
-        if game is None:
+        if game is None or not game.wiki:  # no session, or a game without a wiki
             self._set_state("off")
             return
         try:

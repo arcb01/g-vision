@@ -523,6 +523,7 @@ function wikiState(session) {
 
 // First download of a session's wiki, before any question: the page is just its progress.
 function showsDownload(session) {
+  if (!session.game.wiki) return false;
   const { live, st, first } = wikiState(session);
   return live && first && !session.exchanges.length && !(st && st.state === 'ready');
 }
@@ -559,6 +560,10 @@ function downloadView(session) {
 
 // The wiki's state in the session bar: downloading, catching up, ready (and how fresh), or failed.
 function wikiChip(session) {
+  if (!session.game.wiki) {
+    return el('div', { class: 'wiki-status', id: 'wiki-status', title: 'No wiki for this game: answers come from the screen' },
+      icon('book'), el('div', { class: 'wiki-text' }, el('span', { text: 'No wiki · answers from the screen only' })));
+  }
   const { live, st, info, source } = wikiState(session);
   let text;
   let cls = '';
@@ -660,7 +665,9 @@ function renderSessionView() {
   } else {
     chat.append(el('div', { class: 'chat-hint' }, live ? 'Hold ' : 'No questions in this session.',
       ...(live ? [...kbdList(settings ? settings.values.pttKey : 'alt+3'),
-        ` and ask. Questions about ${x.game.name} itself, like what an item does or what a character wants, are answered from its wiki.`] : [])));
+        x.game.wiki
+          ? ` and ask. Questions about ${x.game.name} itself, like what an item does or what a character wants, are answered from its wiki.`
+          : ' and ask about what is on the screen. This session has no wiki, so answers come from the screen alone.'] : [])));
   }
   box.replaceChildren(bar, chat);
   if (document.querySelector('.page[data-page="sessions"]').classList.contains('active')) $('.main').scrollTop = $('.main').scrollHeight;
@@ -690,7 +697,8 @@ async function startSession(game) {
   const known = indexInfo(r.session.game).pages;
   await refreshSessions(r.session.id);
   showTab('sessions');
-  toast(known ? `Session started: ${r.session.game.name}` : `Session started. Downloading the ${r.session.game.name} wiki in the background`);
+  toast(known || !r.session.game.wiki ? `Session started: ${r.session.game.name}`
+    : `Session started. Downloading the ${r.session.game.name} wiki in the background`);
 }
 
 // Game picker: popular games with how much of their wiki is saved, or any other MediaWiki wiki.
@@ -703,7 +711,7 @@ function renderPicker() {
     el('div', { class: 'game-tile-name', text: g.name }),
     el('div', { class: 'game-tile-sub', text: g.pages ? `Saved · ${number(g.pages)} pages${g.updatedTs ? `, ${since(g.updatedTs)}` : ''}` : host(g.wiki) })),
   g.pages ? el('span', { class: 'saved-dot', title: 'Wiki saved on this PC' }) : null))
-    : [el('div', { class: 'empty-note', text: 'No game by that name in the list: add it below with its wiki address.' })]));
+    : [el('div', { class: 'empty-note', text: 'No game by that name in the list: add it below, with its wiki address if it has one.' })]));
 }
 
 function openPicker() {
