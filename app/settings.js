@@ -54,7 +54,7 @@ const SPEC = [
   },
   {
     key: 'speak', side: 'server', group: 'Voice', label: 'Speak answers', type: 'toggle', default: true, offFlag: '--no-tts',
-    help: 'Off: answers only appear here, in the Log.',
+    help: 'Off: answers only appear in the Log.',
   },
   {
     key: 'readText', side: 'server', group: 'Vision', label: 'Read on-screen text', type: 'toggle', default: true, offFlag: '--no-text',
